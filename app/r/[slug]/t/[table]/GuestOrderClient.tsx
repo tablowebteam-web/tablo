@@ -95,7 +95,6 @@ export default function GuestOrderClient({
   return (
     <main className="min-h-screen bg-[#FBFAF7]">
       <div className="max-w-md mx-auto bg-white min-h-screen shadow-sm">
-        {/* Header */}
         <div className="px-5 pt-5 pb-4 border-b border-charcoal/10">
           <div className="flex justify-between items-center mb-1">
             <span className="text-[10px] tracking-[2px] text-charcoal/50 font-medium">TABLO</span>
@@ -107,7 +106,6 @@ export default function GuestOrderClient({
           )}
         </div>
 
-        {/* Tabs */}
         <div className="flex gap-1 px-4 pt-3 border-b border-charcoal/10 sticky top-0 bg-white z-10">
           {(['menu', 'cart', 'status'] as Tab[]).map(t => (
             <button
@@ -127,7 +125,6 @@ export default function GuestOrderClient({
           ))}
         </div>
 
-        {/* Menu */}
         {tab === 'menu' && (
           <div>
             <div className="flex gap-1.5 px-4 py-3 overflow-x-auto border-b border-charcoal/10">
@@ -177,26 +174,41 @@ export default function GuestOrderClient({
                             )}
                             <div className="text-sm mt-1">₹{item.price}</div>
                           </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            {qty > 0 && (
-                              <>
-                                <button
-                                  onClick={() => dec(item.id)}
-                                  className="w-7 h-7 rounded-full border border-charcoal/30 text-base"
-                                  aria-label="Decrease"
-                                >−</button>
-                                <span className="text-sm font-medium w-4 text-center">{qty}</span>
-                              </>
+
+                          {/* Photo + Add button column */}
+                          <div className="flex flex-col items-end gap-2 shrink-0">
+                            {item.image_url && (
+                              <div className="relative w-20 h-20 rounded-md overflow-hidden bg-charcoal/5">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={item.image_url}
+                                  alt={item.name}
+                                  className="w-full h-full object-cover"
+                                  loading="lazy"
+                                />
+                              </div>
                             )}
-                            <button
-                              onClick={() => inc(item)}
-                              className={`w-7 h-7 rounded-full text-base ${
-                                qty > 0
-                                  ? 'border border-charcoal/30'
-                                  : 'bg-charcoal text-white'
-                              }`}
-                              aria-label="Add"
-                            >+</button>
+                            <div className="flex items-center gap-2">
+                              {qty > 0 && (
+                                <>
+                                  <button
+                                    onClick={() => dec(item.id)}
+                                    className="w-7 h-7 rounded-full border border-charcoal/30 text-base"
+                                    aria-label="Decrease"
+                                  >−</button>
+                                  <span className="text-sm font-medium w-4 text-center">{qty}</span>
+                                </>
+                              )}
+                              <button
+                                onClick={() => inc(item)}
+                                className={`w-7 h-7 rounded-full text-base ${
+                                  qty > 0
+                                    ? 'border border-charcoal/30'
+                                    : 'bg-charcoal text-white'
+                                }`}
+                                aria-label="Add"
+                              >+</button>
+                            </div>
                           </div>
                         </div>
                       );
@@ -220,7 +232,6 @@ export default function GuestOrderClient({
           </div>
         )}
 
-        {/* Cart */}
         {tab === 'cart' && (
           <div className="px-5 py-5">
             {cartCount === 0 ? (
@@ -258,7 +269,6 @@ export default function GuestOrderClient({
           </div>
         )}
 
-        {/* Status */}
         {tab === 'status' && (
           <div className="px-5 py-5">
             {!orderId ? (
@@ -280,7 +290,6 @@ function OrderStatusCard({ orderId, initialStatus }: { orderId: string; initialS
   const stages = ['received', 'preparing', 'ready', 'served'];
   const stageIdx = stages.indexOf(status);
 
-  // Live updates via Supabase Realtime
   useRealtimeOrderStatus(orderId, setStatus);
 
   return (
@@ -303,8 +312,6 @@ function OrderStatusCard({ orderId, initialStatus }: { orderId: string; initialS
 
 function useRealtimeOrderStatus(orderId: string, onUpdate: (s: string) => void) {
   if (typeof window === 'undefined') return;
-  // Lazy-load supabase realtime subscription on client
-  // (kept minimal here — production version would use useEffect properly)
   if (!(window as any).__tablo_subbed_to?.[orderId]) {
     (window as any).__tablo_subbed_to = (window as any).__tablo_subbed_to ?? {};
     (window as any).__tablo_subbed_to[orderId] = true;
