@@ -12,8 +12,9 @@ export default function HomePage() {
         <nav className="flex items-center gap-6 text-sm">
           <a href="#features" className="hidden sm:inline text-charcoal/70 hover:text-charcoal">Features</a>
           <a href="#pricing" className="hidden sm:inline text-charcoal/70 hover:text-charcoal">Pricing</a>
-          <Link href="/admin" className="px-4 py-2 bg-charcoal text-white rounded-md text-sm hover:bg-charcoal/90">
-            Admin →
+          <Link href="/login" className="text-charcoal/70 hover:text-charcoal">Sign in</Link>
+          <Link href="/login" className="px-4 py-2 bg-charcoal text-white rounded-md text-sm hover:bg-charcoal/90">
+            Get started
           </Link>
         </nav>
       </header>
@@ -28,16 +29,17 @@ export default function HomePage() {
           <span className="italic text-forest">orchestrated.</span>
         </h1>
         <p className="mt-6 text-lg text-charcoal/70 max-w-xl mx-auto">
-          Tablo is the all-in-one platform for fine dining. QR self-ordering, kitchen display, table reservations, and guest memory — built for the way modern restaurants run.
+          QR self-ordering, kitchen display, table reservations, and guest memory — built for the way modern restaurants run.
         </p>
         <div className="mt-10 flex flex-wrap justify-center gap-3">
-          <Link href="/r/sahiba/t/7" className="px-6 py-3 bg-forest text-white rounded-md hover:bg-forest/90">
-            Try the guest demo →
+          <Link href="/login" className="px-6 py-3 bg-forest text-white rounded-md hover:bg-forest/90 font-medium">
+            Start free →
           </Link>
-          <Link href="/kitchen/sahiba" className="px-6 py-3 border border-charcoal/20 rounded-md hover:bg-cream">
-            See the kitchen view
+          <Link href="/r/sahiba/t/7" className="px-6 py-3 border border-charcoal/20 rounded-md hover:bg-cream">
+            See guest demo
           </Link>
         </div>
+        <p className="text-xs text-charcoal/50 mt-4">No credit card · Set up in under 5 minutes</p>
       </section>
 
       {/* Features */}
@@ -76,9 +78,21 @@ export default function HomePage() {
               <ul className="mt-6 space-y-2 text-sm">
                 {p.features.map(f => <li key={f} className="flex gap-2"><span className="text-forest">✓</span>{f}</li>)}
               </ul>
+              <Link href="/login" className="block text-center mt-6 px-4 py-2 bg-charcoal text-white rounded text-sm hover:bg-charcoal/90">
+                Start with {p.name}
+              </Link>
             </div>
           ))}
         </div>
+      </section>
+
+      {/* CTA */}
+      <section className="px-6 py-20 bg-forest text-white text-center">
+        <h2 className="font-serif text-4xl mb-3">Ready to orchestrate yours?</h2>
+        <p className="text-white/80 max-w-md mx-auto mb-8">Set up your restaurant in 5 minutes. No credit card.</p>
+        <Link href="/login" className="inline-block px-8 py-3 bg-white text-forest rounded-md font-medium hover:bg-cream">
+          Start free →
+        </Link>
       </section>
 
       <footer className="px-6 py-10 text-center text-sm text-charcoal/50 border-t border-charcoal/10">
@@ -102,14 +116,14 @@ function Logo() {
 const features = [
   { title: 'QR self-ordering', desc: 'Guests scan, browse, order, and pay from their phone. No app, no waiting.', icon: <span className="text-forest text-lg">⌗</span> },
   { title: 'Kitchen display', desc: 'Live order queue with course firing. Replace paper tickets forever.', icon: <span className="text-forest text-lg">▤</span> },
-  { title: 'Guest memory', desc: 'Remember every guest — preferences, allergies, occasions, favorite tables.', icon: <span className="text-forest text-lg">♡</span> },
-  { title: 'Table reservations', desc: 'Smart booking with deposit handling and no-show prediction.', icon: <span className="text-forest text-lg">⊞</span> },
-  { title: 'Inventory tracking', desc: 'Auto-deduct on every order. Theoretical vs actual food cost in real time.', icon: <span className="text-forest text-lg">▦</span> },
-  { title: 'Owner cockpit', desc: 'Live revenue, occupancy, and an AI advisor that spots trends before you do.', icon: <span className="text-forest text-lg">◐</span> }
+  { title: 'Menu management', desc: 'Add dishes, upload photos, mark items unavailable — all in seconds.', icon: <span className="text-forest text-lg">⊞</span> },
+  { title: 'Real-time sync', desc: 'Orders flow from phone to kitchen in under a second. Status updates live.', icon: <span className="text-forest text-lg">⚡</span> },
+  { title: 'Multi-tenant secure', desc: 'Database-level isolation — each restaurant\'s data stays private.', icon: <span className="text-forest text-lg">🛡</span> },
+  { title: 'Magic-link login', desc: 'No passwords, no support tickets. Sign in with email, that\'s it.', icon: <span className="text-forest text-lg">✦</span> }
 ];
 
 const plans = [
   { name: 'Starter', price: '4,999', featured: false, features: ['QR ordering', 'Kitchen display', '1 outlet', 'Email support'] },
   { name: 'Pro', price: '9,999', featured: true, features: ['Everything in Starter', 'Reservations', 'Inventory', 'Guest CRM', 'Priority support'] },
-  { name: 'Signature', price: '14,999', featured: false, features: ['Everything in Pro', 'Multi-outlet', 'AI Advisor', 'White-label QR', 'Dedicated success manager'] }
+  { name: 'Signature', price: '14,999', featured: false, features: ['Everything in Pro', 'Multi-outlet', 'AI Advisor', 'White-label QR', 'Dedicated success'] }
 ];
