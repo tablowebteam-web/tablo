@@ -1,5 +1,5 @@
 import { notFound } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
+import { createServerSupabase } from '@/lib/supabase-server';
 import GuestOrderClient from './GuestOrderClient';
 import type { MenuCategory, MenuItem, Restaurant, RestaurantTable } from '@/lib/types';
 
@@ -10,16 +10,17 @@ export default async function GuestOrderPage({
 }: {
   params: { slug: string; table: string };
 }) {
-  // Look up restaurant by slug
+  const supabase = createServerSupabase();
+
+  // Restaurant
   const { data: restaurant } = await supabase
     .from('restaurants')
     .select('*')
     .eq('slug', params.slug)
     .single<Restaurant>();
-
   if (!restaurant) notFound();
 
-  // Look up table by number
+  // Table
   const tableNum = parseInt(params.table, 10);
   const { data: table } = await supabase
     .from('restaurant_tables')
@@ -27,10 +28,9 @@ export default async function GuestOrderPage({
     .eq('restaurant_id', restaurant.id)
     .eq('number', tableNum)
     .single<RestaurantTable>();
-
   if (!table) notFound();
 
-  // Fetch categories + menu
+  // Menu
   const { data: categories } = await supabase
     .from('menu_categories')
     .select('*')
@@ -44,12 +44,25 @@ export default async function GuestOrderPage({
     .eq('is_available', true)
     .order('sort_order');
 
+  // Optional: customer profile if logged in
+  const { data: { user } } = await supabase.auth.getUser();
+  let customerProfile: { id: string; name: string | null } | null = null;
+  if (user) {
+    const { data: profile } = await supabase
+      .from('customer_profiles')
+      .select('id, name')
+      .eq('user_id', user.id)
+      .maybeSingle();
+    if (profile) customerProfile = profile;
+  }
+
   return (
     <GuestOrderClient
       restaurant={restaurant}
       table={table}
       categories={(categories ?? []) as MenuCategory[]}
       items={(items ?? []) as MenuItem[]}
+      customerProfile={customerProfile}
     />
   );
 }

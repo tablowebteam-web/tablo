@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
+import Link from 'next/link';
 import type { CartLine, MenuCategory, MenuItem, Restaurant, RestaurantTable } from '@/lib/types';
 
 type Tab = 'menu' | 'cart' | 'status';
@@ -10,12 +11,14 @@ export default function GuestOrderClient({
   restaurant,
   table,
   categories,
-  items
+  items,
+  customerProfile
 }: {
   restaurant: Restaurant;
   table: RestaurantTable;
   categories: MenuCategory[];
   items: MenuItem[];
+  customerProfile: { id: string; name: string | null } | null;
 }) {
   const [tab, setTab] = useState<Tab>('menu');
   const [filter, setFilter] = useState<Filter>('all');
@@ -65,6 +68,7 @@ export default function GuestOrderClient({
           restaurantId: restaurant.id,
           tableId: table.id,
           tableNumber: table.number,
+          customerId: customerProfile?.id ?? null,
           items: Object.values(cart).map(l => ({
             menuItemId: l.item.id,
             name: l.item.name,
@@ -85,7 +89,7 @@ export default function GuestOrderClient({
       } else {
         alert(data.error ?? 'Could not place order');
       }
-    } catch (e) {
+    } catch {
       alert('Network error. Please try again.');
     } finally {
       setSubmitting(false);
@@ -95,17 +99,37 @@ export default function GuestOrderClient({
   return (
     <main className="min-h-screen bg-[#FBFAF7]">
       <div className="max-w-md mx-auto bg-white min-h-screen shadow-sm">
+        {/* Header */}
         <div className="px-5 pt-5 pb-4 border-b border-charcoal/10">
           <div className="flex justify-between items-center mb-1">
             <span className="text-[10px] tracking-[2px] text-charcoal/50 font-medium">TABLO</span>
             <span className="text-[11px] text-charcoal/60">Table {table.number} · seats {table.capacity}</span>
           </div>
           <div className="font-serif text-2xl leading-tight">{restaurant.name}</div>
-          {restaurant.tagline && (
-            <div className="text-xs text-charcoal/60 mt-1 italic">{restaurant.tagline}</div>
-          )}
+          {restaurant.tagline && <div className="text-xs text-charcoal/60 mt-1 italic">{restaurant.tagline}</div>}
+
+          {/* Login state */}
+          <div className="mt-3 flex justify-between items-center">
+            {customerProfile ? (
+              <Link href="/me" className="text-[11px] text-forest hover:underline flex items-center gap-1.5">
+                <span className="w-5 h-5 rounded-full bg-cream text-forest flex items-center justify-center text-[9px] font-medium">
+                  {(customerProfile.name ?? 'U').slice(0, 1).toUpperCase()}
+                </span>
+                <span className="font-medium">Hi {customerProfile.name ?? 'there'}</span>
+                <span className="text-charcoal/40">· View profile</span>
+              </Link>
+            ) : (
+              <div className="text-[11px] text-charcoal/60">
+                <Link href={`/customer-login?next=${encodeURIComponent(`/r/${restaurant.slug}/t/${table.number}`)}`} className="text-forest font-medium hover:underline">
+                  Sign in
+                </Link>
+                <span className="ml-1">to track orders & unlock offers</span>
+              </div>
+            )}
+          </div>
         </div>
 
+        {/* Tabs */}
         <div className="flex gap-1 px-4 pt-3 border-b border-charcoal/10 sticky top-0 bg-white z-10">
           {(['menu', 'cart', 'status'] as Tab[]).map(t => (
             <button
@@ -117,14 +141,13 @@ export default function GuestOrderClient({
             >
               {t}
               {t === 'cart' && cartCount > 0 && (
-                <span className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-forest text-white rounded-full">
-                  {cartCount}
-                </span>
+                <span className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-forest text-white rounded-full">{cartCount}</span>
               )}
             </button>
           ))}
         </div>
 
+        {/* Menu */}
         {tab === 'menu' && (
           <div>
             <div className="flex gap-1.5 px-4 py-3 overflow-x-auto border-b border-charcoal/10">
@@ -133,9 +156,7 @@ export default function GuestOrderClient({
                   key={f}
                   onClick={() => setFilter(f)}
                   className={`px-3 py-1 text-xs rounded-full border whitespace-nowrap ${
-                    filter === f
-                      ? 'bg-charcoal text-white border-charcoal'
-                      : 'bg-white text-charcoal/70 border-charcoal/20'
+                    filter === f ? 'bg-charcoal text-white border-charcoal' : 'bg-white text-charcoal/70 border-charcoal/20'
                   }`}
                 >
                   {f === 'all' ? 'All' : f === 'veg' ? 'Veg' : f === 'chef' ? "Chef's pick" : 'Nut-free'}
@@ -164,49 +185,29 @@ export default function GuestOrderClient({
                               )}
                               <span className="text-sm font-medium">{item.name}</span>
                               {item.is_chef_pick && (
-                                <span className="text-[9px] tracking-wide bg-cream text-forest px-1.5 py-0.5 rounded">
-                                  CHEF
-                                </span>
+                                <span className="text-[9px] tracking-wide bg-cream text-forest px-1.5 py-0.5 rounded">CHEF</span>
                               )}
                             </div>
-                            {item.description && (
-                              <div className="text-xs text-charcoal/60 leading-relaxed">{item.description}</div>
-                            )}
+                            {item.description && <div className="text-xs text-charcoal/60 leading-relaxed">{item.description}</div>}
                             <div className="text-sm mt-1">₹{item.price}</div>
                           </div>
-
-                          {/* Photo + Add button column */}
                           <div className="flex flex-col items-end gap-2 shrink-0">
                             {item.image_url && (
                               <div className="relative w-20 h-20 rounded-md overflow-hidden bg-charcoal/5">
                                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img
-                                  src={item.image_url}
-                                  alt={item.name}
-                                  className="w-full h-full object-cover"
-                                  loading="lazy"
-                                />
+                                <img src={item.image_url} alt={item.name} className="w-full h-full object-cover" loading="lazy" />
                               </div>
                             )}
                             <div className="flex items-center gap-2">
                               {qty > 0 && (
                                 <>
-                                  <button
-                                    onClick={() => dec(item.id)}
-                                    className="w-7 h-7 rounded-full border border-charcoal/30 text-base"
-                                    aria-label="Decrease"
-                                  >−</button>
+                                  <button onClick={() => dec(item.id)} className="w-7 h-7 rounded-full border border-charcoal/30 text-base">−</button>
                                   <span className="text-sm font-medium w-4 text-center">{qty}</span>
                                 </>
                               )}
                               <button
                                 onClick={() => inc(item)}
-                                className={`w-7 h-7 rounded-full text-base ${
-                                  qty > 0
-                                    ? 'border border-charcoal/30'
-                                    : 'bg-charcoal text-white'
-                                }`}
-                                aria-label="Add"
+                                className={`w-7 h-7 rounded-full text-base ${qty > 0 ? 'border border-charcoal/30' : 'bg-charcoal text-white'}`}
                               >+</button>
                             </div>
                           </div>
@@ -232,12 +233,11 @@ export default function GuestOrderClient({
           </div>
         )}
 
+        {/* Cart */}
         {tab === 'cart' && (
           <div className="px-5 py-5">
             {cartCount === 0 ? (
-              <div className="text-center py-16 text-charcoal/50 text-sm">
-                Your cart is empty. Pick something from the menu.
-              </div>
+              <div className="text-center py-16 text-charcoal/50 text-sm">Your cart is empty. Pick something from the menu.</div>
             ) : (
               <>
                 {Object.values(cart).map(line => (
@@ -269,12 +269,11 @@ export default function GuestOrderClient({
           </div>
         )}
 
+        {/* Status */}
         {tab === 'status' && (
           <div className="px-5 py-5">
             {!orderId ? (
-              <div className="text-center py-16 text-charcoal/50 text-sm">
-                No orders placed yet.
-              </div>
+              <div className="text-center py-16 text-charcoal/50 text-sm">No orders placed yet.</div>
             ) : (
               <OrderStatusCard orderId={orderId} initialStatus={orderStatus ?? 'received'} />
             )}
@@ -300,9 +299,7 @@ function OrderStatusCard({ orderId, initialStatus }: { orderId: string; initialS
         {stages.map((s, i) => (
           <div key={s}>
             <div className={`h-1 rounded-full ${i <= stageIdx ? 'bg-forest' : 'bg-charcoal/15'}`} />
-            <div className={`text-[10px] mt-1.5 capitalize text-center ${i <= stageIdx ? 'text-forest font-medium' : 'text-charcoal/40'}`}>
-              {s}
-            </div>
+            <div className={`text-[10px] mt-1.5 capitalize text-center ${i <= stageIdx ? 'text-forest font-medium' : 'text-charcoal/40'}`}>{s}</div>
           </div>
         ))}
       </div>
@@ -318,14 +315,11 @@ function useRealtimeOrderStatus(orderId: string, onUpdate: (s: string) => void) 
     import('@/lib/supabase').then(({ supabase }) => {
       supabase
         .channel(`order-${orderId}`)
-        .on(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'orders', filter: `id=eq.${orderId}` },
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders', filter: `id=eq.${orderId}` },
           payload => {
             const newStatus = (payload.new as any).status;
             if (newStatus) onUpdate(newStatus);
-          }
-        )
+          })
         .subscribe();
     });
   }
