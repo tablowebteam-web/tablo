@@ -15,6 +15,12 @@ interface ActiveOrder {
   created_at: string;
 }
 
+interface PreviewOffer {
+  offerType: string;
+  description: string;
+  discountAmount: number;
+}
+
 export default function GuestOrderClient({
   restaurant,
   table,
@@ -35,54 +41,76 @@ export default function GuestOrderClient({
   const [cart, setCart] = useState<Record<string, CartLine>>({});
   const [activeOrders, setActiveOrders] = useState<ActiveOrder[]>(initialActiveOrders);
   const [submitting, setSubmitting] = useState(false);
+  const [previewOffer, setPreviewOffer] = useState<PreviewOffer | null>(null);
 
-  const filteredItems = useMemo(() => {
-    return items.filter(it => {
-      if (filter === 'all') return true;
-      if (filter === 'veg') return it.is_veg;
-      if (filter === 'chef') return it.is_chef_pick;
-      if (filter === 'nutfree') return !(it.allergens ?? []).includes('nuts');
-      return true;
-    });
-  }, [items, filter]);
+  const filteredItems = useMemo(() => items.filter(it => {
+    if (filter === 'all') return true;
+    if (filter === 'veg') return it.is_veg;
+    if (filter === 'chef') return it.is_chef_pick;
+    if (filter === 'nutfree') return !(it.allergens ?? []).includes('nuts');
+    return true;
+  }), [items, filter]);
 
   const cartCount = Object.values(cart).reduce((s, l) => s + l.qty, 0);
   const subtotal = Object.values(cart).reduce((s, l) => s + l.qty * l.item.price, 0);
-  const tax = Math.round(subtotal * (restaurant.tax_rate / 100));
-  const total = subtotal + tax;
 
-  // Subscribe to realtime updates for ALL active orders
+  // Calculate discount based on preview offer
+  const discount = previewOffer && subtotal > 0
+    ? (() => {
+        // Re-scale the preview discount to match real subtotal proportionally if it's percent-based
+        // Easiest approach: just request a fresh preview when subtotal changes
+        return Math.min(previewOffer.discountAmount, subtotal);
+      })()
+    : 0;
+  const subtotalAfterDiscount = Math.max(0, subtotal - discount);
+  const tax = Math.round(subtotalAfterDiscount * (restaurant.tax_rate / 100));
+  const total = subtotalAfterDiscount + tax;
+
+  // Fetch initial offer preview when customer is logged in
+  useEffect(() => {
+    if (!customerProfile) return;
+    fetch(`/api/offer-preview?restaurantId=${restaurant.id}&subtotal=1000`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.offer) setPreviewOffer(data.offer);
+      })
+      .catch(() => {});
+  }, [customerProfile, restaurant.id]);
+
+  // Re-fetch preview when subtotal changes (so percent discounts scale correctly)
+  useEffect(() => {
+    if (!customerProfile || subtotal === 0) return;
+    const t = setTimeout(() => {
+      fetch(`/api/offer-preview?restaurantId=${restaurant.id}&subtotal=${subtotal}`)
+        .then(r => r.json())
+        .then(data => setPreviewOffer(data.offer ?? null))
+        .catch(() => {});
+    }, 300);
+    return () => clearTimeout(t);
+  }, [subtotal, customerProfile, restaurant.id]);
+
+  // Realtime updates for active orders
   useEffect(() => {
     if (activeOrders.length === 0) return;
-
     const orderIds = activeOrders.map(o => o.id);
     let mounted = true;
 
     import('@/lib/supabase').then(({ supabase }) => {
       const channel = supabase
         .channel(`guest-orders-${table.id}`)
-        .on(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'orders' },
-          payload => {
-            if (!mounted) return;
-            const updated = payload.new as any;
-            // Only react to orders we are watching
-            if (orderIds.includes(updated.id)) {
-              setActiveOrders(prev =>
-                prev
-                  .map(o => o.id === updated.id ? { ...o, status: updated.status, total: Number(updated.total) } : o)
-                  // Remove paid/cancelled orders from active view
-                  .filter(o => !['paid', 'cancelled'].includes(o.status))
-              );
-            }
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders' }, payload => {
+          if (!mounted) return;
+          const updated = payload.new as any;
+          if (orderIds.includes(updated.id)) {
+            setActiveOrders(prev =>
+              prev
+                .map(o => o.id === updated.id ? { ...o, status: updated.status, total: Number(updated.total) } : o)
+                .filter(o => !['paid', 'cancelled'].includes(o.status))
+            );
           }
-        )
+        })
         .subscribe();
-
-      return () => {
-        supabase.removeChannel(channel);
-      };
+      return () => { supabase.removeChannel(channel); };
     });
 
     return () => { mounted = false; };
@@ -128,11 +156,10 @@ export default function GuestOrderClient({
       });
       const data = await res.json();
       if (data.id) {
-        // Add the new order to active orders
         setActiveOrders(prev => [{
           id: data.id,
           status: 'received',
-          total,
+          total: Number(data.total ?? total),
           table_number: table.number,
           created_at: new Date().toISOString()
         }, ...prev]);
@@ -183,6 +210,16 @@ export default function GuestOrderClient({
           </div>
         </div>
 
+        {/* OFFER BANNER */}
+        {previewOffer && (
+          <div className="px-5 pt-3">
+            <div className="bg-gradient-to-r from-forest to-emerald rounded-lg p-3 text-white text-sm leading-relaxed">
+              <strong>{previewOffer.description}</strong>
+              <div className="text-xs opacity-90 mt-0.5">Discount applied automatically at checkout.</div>
+            </div>
+          </div>
+        )}
+
         {/* Tabs */}
         <div className="flex gap-1 px-4 pt-3 border-b border-charcoal/10 sticky top-0 bg-white z-10">
           {(['menu', 'cart', 'status'] as Tab[]).map(t => (
@@ -226,9 +263,7 @@ export default function GuestOrderClient({
                 if (catItems.length === 0) return null;
                 return (
                   <div key={cat.id}>
-                    <div className="text-[10px] tracking-[2px] text-charcoal/50 font-medium mt-5 mb-2">
-                      {cat.name.toUpperCase()}
-                    </div>
+                    <div className="text-[10px] tracking-[2px] text-charcoal/50 font-medium mt-5 mb-2">{cat.name.toUpperCase()}</div>
                     {catItems.map(item => {
                       const qty = cart[item.id]?.qty ?? 0;
                       return (
@@ -262,10 +297,7 @@ export default function GuestOrderClient({
                                   <span className="text-sm font-medium w-4 text-center">{qty}</span>
                                 </>
                               )}
-                              <button
-                                onClick={() => inc(item)}
-                                className={`w-7 h-7 rounded-full text-base ${qty > 0 ? 'border border-charcoal/30' : 'bg-charcoal text-white'}`}
-                              >+</button>
+                              <button onClick={() => inc(item)} className={`w-7 h-7 rounded-full text-base ${qty > 0 ? 'border border-charcoal/30' : 'bg-charcoal text-white'}`}>+</button>
                             </div>
                           </div>
                         </div>
@@ -308,6 +340,12 @@ export default function GuestOrderClient({
                 ))}
                 <div className="mt-5 pt-4 border-t border-charcoal/10 space-y-1.5 text-sm">
                   <div className="flex justify-between text-charcoal/70"><span>Subtotal</span><span>₹{subtotal}</span></div>
+                  {discount > 0 && previewOffer && (
+                    <div className="flex justify-between text-forest font-medium">
+                      <span>{previewOffer.description}</span>
+                      <span>−₹{discount}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between text-charcoal/70"><span>GST {restaurant.tax_rate}%</span><span>₹{tax}</span></div>
                   <div className="flex justify-between text-base font-medium pt-2 mt-2 border-t border-charcoal/10">
                     <span>Total</span><span>₹{total}</span>
@@ -326,16 +364,14 @@ export default function GuestOrderClient({
           </div>
         )}
 
-        {/* Status — now from real DB data */}
+        {/* Status */}
         {tab === 'status' && (
           <div className="px-5 py-5">
             {activeOrders.length === 0 ? (
               <div className="text-center py-16 text-charcoal/50 text-sm">No active orders yet.</div>
             ) : (
               <div className="space-y-3">
-                {activeOrders.map(o => (
-                  <OrderStatusCard key={o.id} order={o} />
-                ))}
+                {activeOrders.map(o => <OrderStatusCard key={o.id} order={o} />)}
               </div>
             )}
           </div>
@@ -348,7 +384,6 @@ export default function GuestOrderClient({
 function OrderStatusCard({ order }: { order: ActiveOrder }) {
   const stages = ['received', 'preparing', 'ready', 'served'];
   const stageIdx = stages.indexOf(order.status);
-
   return (
     <div className="bg-cream/50 rounded-lg p-4">
       <div className="flex justify-between items-start mb-1">
