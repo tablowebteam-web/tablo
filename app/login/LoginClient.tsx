@@ -20,6 +20,9 @@ export default function LoginClient() {
     setSubmitting(true);
     setError(null);
 
+    // Store destination in cookie (Supabase sometimes strips query params)
+    document.cookie = `tablo_login_redirect=${encodeURIComponent(next)}; path=/; max-age=3600; samesite=lax`;
+
     const supabase = createBrowserSupabase();
     const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
 
@@ -39,7 +42,6 @@ export default function LoginClient() {
   return (
     <main className="min-h-screen flex items-center justify-center px-6 bg-[#FBFAF7]">
       <div className="w-full max-w-sm">
-        {/* Logo */}
         <div className="flex flex-col items-center mb-8">
           <Link href="/" className="flex items-center gap-2">
             <svg width="32" height="32" viewBox="0 0 56 56">
@@ -66,9 +68,7 @@ export default function LoginClient() {
                 We sent a magic link to<br/>
                 <span className="font-medium text-charcoal">{email}</span>
               </p>
-              <p className="text-xs text-charcoal/50 mt-4">
-                Click the link to sign in. The link expires in 1 hour.
-              </p>
+              <p className="text-xs text-charcoal/50 mt-4">Click the link to sign in. The link expires in 1 hour.</p>
               <button
                 onClick={() => { setSent(false); setEmail(''); }}
                 className="text-xs text-charcoal/60 hover:text-charcoal mt-4 underline"
@@ -93,9 +93,7 @@ export default function LoginClient() {
                 />
 
                 {error && (
-                  <div className="mt-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2">
-                    {error}
-                  </div>
+                  <div className="mt-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2">{error}</div>
                 )}
 
                 <button

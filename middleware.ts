@@ -26,20 +26,33 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // Refresh session if it exists. This MUST run on every request.
+  // Refresh session if it exists
   const { data: { user } } = await supabase.auth.getUser();
 
-  // Gate /admin routes — must be authenticated
   const path = request.nextUrl.pathname;
+
+  // Restaurant owner /admin routes — must be authenticated
   if (path.startsWith('/admin') && !user) {
     const loginUrl = new URL('/login', request.url);
     loginUrl.searchParams.set('next', path);
     return NextResponse.redirect(loginUrl);
   }
 
-  // Already logged in? Skip /login
+  // Customer-only routes — must be authenticated
+  if (path.startsWith('/me') && !user) {
+    const loginUrl = new URL('/customer-login', request.url);
+    loginUrl.searchParams.set('next', path);
+    return NextResponse.redirect(loginUrl);
+  }
+
+  // If user is logged in and visits /login, send to /admin (owner flow)
   if (path === '/login' && user) {
     return NextResponse.redirect(new URL('/admin', request.url));
+  }
+
+  // If user is logged in and visits /customer-login, send to /me (customer flow)
+  if (path === '/customer-login' && user) {
+    return NextResponse.redirect(new URL('/me', request.url));
   }
 
   return response;
@@ -47,7 +60,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // Run on all routes except static assets, images, and api routes
     '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'
   ]
 };

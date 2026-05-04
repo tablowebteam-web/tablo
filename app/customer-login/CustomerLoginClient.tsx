@@ -20,6 +20,10 @@ export default function CustomerLoginClient() {
     setSubmitting(true);
     setError(null);
 
+    // Store destination in a cookie so we can retrieve it after the magic link click
+    // (Supabase sometimes strips query params from the redirect URL)
+    document.cookie = `tablo_login_redirect=${encodeURIComponent(next)}; path=/; max-age=3600; samesite=lax`;
+
     const supabase = createBrowserSupabase();
     const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
 
