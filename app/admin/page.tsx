@@ -7,11 +7,9 @@ export const dynamic = 'force-dynamic';
 
 export default async function AdminPage() {
   const supabase = createServerSupabase();
-
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  // Fetch restaurants the user is a member of
   const { data: memberships } = await supabase
     .from('restaurant_members')
     .select('role, restaurants(*)')
@@ -21,22 +19,15 @@ export default async function AdminPage() {
     .map((m: any) => ({ ...m.restaurants, role: m.role }))
     .filter(r => r.id);
 
-  // 🆕 If user has NO restaurants, send them to onboarding
-  if (restaurants.length === 0) {
-    redirect('/onboarding');
-  }
+  if (restaurants.length === 0) redirect('/onboarding');
 
   return (
     <main className="min-h-screen">
       <AdminHeader user={user} />
-
       <div className="max-w-5xl mx-auto p-6">
         <div className="flex justify-between items-center mb-6">
           <h1 className="font-serif text-3xl">Your restaurants</h1>
-          <Link
-            href="/onboarding"
-            className="px-3 py-2 text-sm border border-charcoal/20 rounded hover:bg-charcoal/5"
-          >
+          <Link href="/onboarding" className="px-3 py-2 text-sm border border-charcoal/20 rounded hover:bg-charcoal/5">
             + Add restaurant
           </Link>
         </div>
@@ -48,16 +39,16 @@ export default async function AdminPage() {
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="font-serif text-xl">{r.name}</span>
-                    <span className="text-[10px] tracking-wider bg-cream text-forest px-2 py-0.5 rounded uppercase">
-                      {r.role}
-                    </span>
+                    <span className="text-[10px] tracking-wider bg-cream text-forest px-2 py-0.5 rounded uppercase">{r.role}</span>
                   </div>
                   <div className="text-xs text-charcoal/60 mt-1">/r/{r.slug}{r.address ? ` · ${r.address}` : ''}</div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
+                  <Link href={`/admin/${r.slug}/insights`} className="px-3 py-1.5 text-sm bg-forest text-white rounded hover:bg-forest/90">📊 Insights</Link>
                   <Link href={`/admin/${r.slug}/menu`} className="px-3 py-1.5 text-sm border border-charcoal/20 rounded hover:bg-charcoal/5">Menu</Link>
+                  <Link href={`/admin/${r.slug}/offers`} className="px-3 py-1.5 text-sm border border-charcoal/20 rounded hover:bg-charcoal/5">Offers</Link>
                   <Link href={`/admin/${r.slug}/qr`} className="px-3 py-1.5 text-sm border border-charcoal/20 rounded hover:bg-charcoal/5">QR codes</Link>
-                  <Link href={`/admin/${r.slug}/orders`} className="px-3 py-1.5 text-sm bg-charcoal text-white rounded hover:bg-charcoal/90">Orders</Link>
+                  <Link href={`/admin/${r.slug}/orders`} className="px-3 py-1.5 text-sm border border-charcoal/20 rounded hover:bg-charcoal/5">Orders</Link>
                 </div>
               </div>
             </div>
