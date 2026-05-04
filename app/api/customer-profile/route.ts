@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
+import { createAdminClient } from '@/lib/supabase';
 
 export async function PATCH(req: NextRequest) {
   try {
@@ -8,38 +9,32 @@ export async function PATCH(req: NextRequest) {
     if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
     const body = await req.json();
-    const updates: any = {};
-    if (body.name !== undefined) updates.name = body.name;
-    if (body.phone !== undefined) updates.phone = body.phone;
-    if (body.birthday !== undefined) updates.birthday = body.birthday;
-    if (body.anniversary !== undefined) updates.anniversary = body.anniversary;
 
-    // Upsert: create profile if missing, update if exists
-    const { data: existing } = await supabase
+    // Build updates object — only include fields that were sent
+    const updates: any = { user_id: user.id };
+    if (body.name !== undefined) updates.name = body.name || null;
+    if (body.phone !== undefined) updates.phone = body.phone || null;
+    if (body.birthday !== undefined) updates.birthday = body.birthday || null;
+    if (body.anniversary !== undefined) updates.anniversary = body.anniversary || null;
+
+    // Use admin client to bypass RLS edge cases on upsert
+    const admin = createAdminClient();
+
+    // Try true upsert (insert or update on conflict) — most reliable approach
+    const { data, error } = await admin
       .from('customer_profiles')
-      .select('id')
-      .eq('user_id', user.id)
-      .maybeSingle();
+      .upsert(updates, { onConflict: 'user_id' })
+      .select()
+      .single();
 
-    if (existing) {
-      const { data, error } = await supabase
-        .from('customer_profiles')
-        .update(updates)
-        .eq('user_id', user.id)
-        .select()
-        .single();
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-      return NextResponse.json(data);
-    } else {
-      const { data, error } = await supabase
-        .from('customer_profiles')
-        .insert({ user_id: user.id, ...updates })
-        .select()
-        .single();
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-      return NextResponse.json(data);
+    if (error) {
+      console.error('Profile save error:', error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
+
+    return NextResponse.json(data);
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 });
+    console.error('Profile save exception:', e);
+    return NextResponse.json({ error: e.message ?? 'Save failed' }, { status: 500 });
   }
 }

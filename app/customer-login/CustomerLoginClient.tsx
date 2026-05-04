@@ -7,6 +7,7 @@ import { createBrowserSupabase } from '@/lib/supabase';
 
 export default function CustomerLoginClient() {
   const params = useSearchParams();
+  // 'next' is where to land after auth click. Default: profile page.
   const next = params.get('next') ?? '/me';
 
   const [email, setEmail] = useState('');
@@ -20,12 +21,22 @@ export default function CustomerLoginClient() {
     setSubmitting(true);
     setError(null);
 
-    // Store destination in a cookie so we can retrieve it after the magic link click
-    // (Supabase sometimes strips query params from the redirect URL)
+    // Cookie 1: where to redirect after auth callback
     document.cookie = `tablo_login_redirect=${encodeURIComponent(next)}; path=/; max-age=3600; samesite=lax`;
 
+    // Cookie 2: if next is a restaurant menu, set return_to so profile page knows where to send back
+    if (next.startsWith('/r/')) {
+      // Send user to profile first (with returnTo), so they can fill DOB/anniversary, then go back to menu
+      const profileFlow = `/me?returnTo=${encodeURIComponent(next)}`;
+      document.cookie = `tablo_login_redirect=${encodeURIComponent(profileFlow)}; path=/; max-age=3600; samesite=lax`;
+      document.cookie = `tablo_return_to=${encodeURIComponent(next)}; path=/; max-age=3600; samesite=lax`;
+    }
+
     const supabase = createBrowserSupabase();
-    const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
+    const finalNext = next.startsWith('/r/')
+      ? `/me?returnTo=${encodeURIComponent(next)}`
+      : next;
+    const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(finalNext)}`;
 
     const { error } = await supabase.auth.signInWithOtp({
       email: email.trim(),

@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useSearchParams, useRouter } from 'next/navigation';
 
 interface Profile {
   id: string;
@@ -29,6 +30,10 @@ export default function CustomerProfileClient({
   profile: Profile;
   orders: OrderRow[];
 }) {
+  const router = useRouter();
+  const params = useSearchParams();
+  const returnTo = params.get('returnTo'); // e.g. /r/sahiba/t/7
+
   const [profile, setProfile] = useState(initialProfile);
   const [name, setName] = useState(profile.name ?? '');
   const [phone, setPhone] = useState(profile.phone ?? '');
@@ -36,34 +41,70 @@ export default function CustomerProfileClient({
   const [anniversary, setAnniversary] = useState(profile.anniversary ?? '');
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // If we have a returnTo, also stash it in a cookie so the user can pick a "Continue to menu" path even after refresh
+  useEffect(() => {
+    if (returnTo) {
+      document.cookie = `tablo_return_to=${encodeURIComponent(returnTo)}; path=/; max-age=3600; samesite=lax`;
+    }
+  }, [returnTo]);
 
   function show(msg: string) {
     setToast(msg);
     setTimeout(() => setToast(null), 2500);
   }
 
-  async function save() {
+  function readReturnCookie(): string | null {
+    if (typeof document === 'undefined') return null;
+    const m = document.cookie.match(/(?:^|; )tablo_return_to=([^;]*)/);
+    return m ? decodeURIComponent(m[1]) : null;
+  }
+
+  async function save(thenRedirect: boolean) {
     if (saving) return;
     setSaving(true);
-    const res = await fetch('/api/customer-profile', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: name.trim() || null,
-        phone: phone.trim() || null,
-        birthday: birthday || null,
-        anniversary: anniversary || null
-      })
-    });
-    setSaving(false);
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      show('Save failed: ' + (err.error ?? 'unknown'));
-      return;
+    setError(null);
+    try {
+      const res = await fetch('/api/customer-profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim() || null,
+          phone: phone.trim() || null,
+          birthday: birthday || null,
+          anniversary: anniversary || null
+        })
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        const msg = err.error ?? `Save failed (HTTP ${res.status})`;
+        setError(msg);
+        show(msg);
+        setSaving(false);
+        return;
+      }
+
+      const updated = await res.json();
+      setProfile(updated);
+      show('Profile saved ✓');
+
+      if (thenRedirect) {
+        const dest = returnTo ?? readReturnCookie();
+        if (dest) {
+          // Clear cookie and go
+          document.cookie = 'tablo_return_to=; path=/; max-age=0';
+          setTimeout(() => router.push(dest), 600);
+        }
+      }
+    } catch (e: any) {
+      const msg = e.message ?? 'Network error';
+      setError(msg);
+      show(msg);
+    } finally {
+      setSaving(false);
     }
-    const updated = await res.json();
-    setProfile(updated);
-    show('Profile saved ✓');
   }
 
   async function signOut() {
@@ -72,10 +113,11 @@ export default function CustomerProfileClient({
   }
 
   const initials = (name || userEmail || 'U').slice(0, 2).toUpperCase();
+  const cookieReturnTo = typeof window !== 'undefined' ? readReturnCookie() : null;
+  const effectiveReturnTo = returnTo ?? cookieReturnTo;
 
   return (
     <main className="min-h-screen bg-[#FBFAF7]">
-      {/* Header */}
       <header className="bg-white border-b border-charcoal/10">
         <div className="max-w-2xl mx-auto px-5 py-3 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2">
@@ -87,12 +129,25 @@ export default function CustomerProfileClient({
             </svg>
             <span className="font-serif text-lg">tablo</span>
           </Link>
-          <button onClick={signOut} className="text-xs text-charcoal/60 hover:text-charcoal">Sign out</button>
+          <div className="flex items-center gap-3">
+            {effectiveReturnTo && (
+              <Link href={effectiveReturnTo} className="text-xs text-forest hover:underline">
+                ← Back to menu
+              </Link>
+            )}
+            <button onClick={signOut} className="text-xs text-charcoal/60 hover:text-charcoal">Sign out</button>
+          </div>
         </div>
       </header>
 
       <div className="max-w-2xl mx-auto px-5 py-6">
-        {/* Profile header */}
+        {/* Welcome banner — only on first visit when there's a returnTo */}
+        {effectiveReturnTo && !profile.name && (
+          <div className="bg-cream/70 border border-cream rounded-lg p-4 mb-5 text-sm text-forest">
+            🎉 <strong>Welcome to Tablo!</strong> Add your details below and we'll bring you back to the menu when you're done.
+          </div>
+        )}
+
         <div className="flex items-center gap-3 mb-5">
           <div className="w-12 h-12 rounded-full bg-cream text-forest flex items-center justify-center text-base font-medium">
             {initials}
@@ -103,7 +158,6 @@ export default function CustomerProfileClient({
           </div>
         </div>
 
-        {/* Profile form */}
         <div className="bg-white border border-charcoal/10 rounded-lg p-5 mb-5">
           <h2 className="font-serif text-lg mb-1">Your profile</h2>
           <p className="text-xs text-charcoal/60 mb-4">
@@ -152,16 +206,42 @@ export default function CustomerProfileClient({
             </div>
           </div>
 
-          <button
-            onClick={save}
-            disabled={saving}
-            className="w-full mt-5 bg-forest text-white py-2.5 rounded-md text-sm font-medium hover:bg-forest/90 disabled:opacity-50"
-          >
-            {saving ? 'Saving…' : 'Save profile'}
-          </button>
+          {error && (
+            <div className="mt-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2">
+              {error}
+            </div>
+          )}
+
+          <div className="flex gap-2 mt-5">
+            {effectiveReturnTo ? (
+              <>
+                <button
+                  onClick={() => save(false)}
+                  disabled={saving}
+                  className="px-4 py-2.5 border border-charcoal/20 rounded-md text-sm font-medium hover:bg-charcoal/5 disabled:opacity-50"
+                >
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+                <button
+                  onClick={() => save(true)}
+                  disabled={saving}
+                  className="flex-1 bg-forest text-white py-2.5 rounded-md text-sm font-medium hover:bg-forest/90 disabled:opacity-50"
+                >
+                  {saving ? 'Saving…' : 'Save & continue to menu →'}
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => save(false)}
+                disabled={saving}
+                className="w-full bg-forest text-white py-2.5 rounded-md text-sm font-medium hover:bg-forest/90 disabled:opacity-50"
+              >
+                {saving ? 'Saving…' : 'Save profile'}
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* Order history */}
         <div>
           <h2 className="font-serif text-lg mb-3">Order history</h2>
 
@@ -177,9 +257,7 @@ export default function CustomerProfileClient({
                 <div key={o.id} className="bg-white border border-charcoal/10 rounded-lg p-4">
                   <div className="flex justify-between items-start gap-3">
                     <div className="min-w-0">
-                      <div className="font-medium text-sm truncate">
-                        {o.restaurants?.name ?? 'Restaurant'}
-                      </div>
+                      <div className="font-medium text-sm truncate">{o.restaurants?.name ?? 'Restaurant'}</div>
                       <div className="text-xs text-charcoal/60 mt-0.5">
                         Table {o.table_number ?? '?'} · {new Date(o.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
                       </div>

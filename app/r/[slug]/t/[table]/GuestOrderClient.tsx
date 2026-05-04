@@ -111,7 +111,7 @@ export default function GuestOrderClient({
           {/* Login state */}
           <div className="mt-3 flex justify-between items-center">
             {customerProfile ? (
-              <Link href="/me" className="text-[11px] text-forest hover:underline flex items-center gap-1.5">
+              <Link href={`/me?returnTo=${encodeURIComponent(`/r/${restaurant.slug}/t/${table.number}`)}`} className="text-[11px] text-forest hover:underline flex items-center gap-1.5">
                 <span className="w-5 h-5 rounded-full bg-cream text-forest flex items-center justify-center text-[9px] font-medium">
                   {(customerProfile.name ?? 'U').slice(0, 1).toUpperCase()}
                 </span>
