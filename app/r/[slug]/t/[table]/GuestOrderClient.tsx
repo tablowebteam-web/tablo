@@ -1,30 +1,39 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
 import type { CartLine, MenuCategory, MenuItem, Restaurant, RestaurantTable } from '@/lib/types';
 
 type Tab = 'menu' | 'cart' | 'status';
 type Filter = 'all' | 'veg' | 'chef' | 'nutfree';
 
+interface ActiveOrder {
+  id: string;
+  status: string;
+  total: number;
+  table_number: number | null;
+  created_at: string;
+}
+
 export default function GuestOrderClient({
   restaurant,
   table,
   categories,
   items,
-  customerProfile
+  customerProfile,
+  initialActiveOrders = []
 }: {
   restaurant: Restaurant;
   table: RestaurantTable;
   categories: MenuCategory[];
   items: MenuItem[];
   customerProfile: { id: string; name: string | null } | null;
+  initialActiveOrders?: ActiveOrder[];
 }) {
   const [tab, setTab] = useState<Tab>('menu');
   const [filter, setFilter] = useState<Filter>('all');
   const [cart, setCart] = useState<Record<string, CartLine>>({});
-  const [orderId, setOrderId] = useState<string | null>(null);
-  const [orderStatus, setOrderStatus] = useState<string | null>(null);
+  const [activeOrders, setActiveOrders] = useState<ActiveOrder[]>(initialActiveOrders);
   const [submitting, setSubmitting] = useState(false);
 
   const filteredItems = useMemo(() => {
@@ -41,6 +50,43 @@ export default function GuestOrderClient({
   const subtotal = Object.values(cart).reduce((s, l) => s + l.qty * l.item.price, 0);
   const tax = Math.round(subtotal * (restaurant.tax_rate / 100));
   const total = subtotal + tax;
+
+  // Subscribe to realtime updates for ALL active orders
+  useEffect(() => {
+    if (activeOrders.length === 0) return;
+
+    const orderIds = activeOrders.map(o => o.id);
+    let mounted = true;
+
+    import('@/lib/supabase').then(({ supabase }) => {
+      const channel = supabase
+        .channel(`guest-orders-${table.id}`)
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'orders' },
+          payload => {
+            if (!mounted) return;
+            const updated = payload.new as any;
+            // Only react to orders we are watching
+            if (orderIds.includes(updated.id)) {
+              setActiveOrders(prev =>
+                prev
+                  .map(o => o.id === updated.id ? { ...o, status: updated.status, total: Number(updated.total) } : o)
+                  // Remove paid/cancelled orders from active view
+                  .filter(o => !['paid', 'cancelled'].includes(o.status))
+              );
+            }
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    });
+
+    return () => { mounted = false; };
+  }, [activeOrders.map(o => o.id).join(','), table.id]);
 
   function inc(item: MenuItem) {
     setCart(c => ({ ...c, [item.id]: { item, qty: (c[item.id]?.qty ?? 0) + 1 } }));
@@ -82,8 +128,14 @@ export default function GuestOrderClient({
       });
       const data = await res.json();
       if (data.id) {
-        setOrderId(data.id);
-        setOrderStatus('received');
+        // Add the new order to active orders
+        setActiveOrders(prev => [{
+          id: data.id,
+          status: 'received',
+          total,
+          table_number: table.number,
+          created_at: new Date().toISOString()
+        }, ...prev]);
         setCart({});
         setTab('status');
       } else {
@@ -108,10 +160,12 @@ export default function GuestOrderClient({
           <div className="font-serif text-2xl leading-tight">{restaurant.name}</div>
           {restaurant.tagline && <div className="text-xs text-charcoal/60 mt-1 italic">{restaurant.tagline}</div>}
 
-          {/* Login state */}
           <div className="mt-3 flex justify-between items-center">
             {customerProfile ? (
-              <Link href={`/me?returnTo=${encodeURIComponent(`/r/${restaurant.slug}/t/${table.number}`)}`} className="text-[11px] text-forest hover:underline flex items-center gap-1.5">
+              <Link
+                href={`/me?returnTo=${encodeURIComponent(`/r/${restaurant.slug}/t/${table.number}`)}`}
+                className="text-[11px] text-forest hover:underline flex items-center gap-1.5"
+              >
                 <span className="w-5 h-5 rounded-full bg-cream text-forest flex items-center justify-center text-[9px] font-medium">
                   {(customerProfile.name ?? 'U').slice(0, 1).toUpperCase()}
                 </span>
@@ -142,6 +196,9 @@ export default function GuestOrderClient({
               {t}
               {t === 'cart' && cartCount > 0 && (
                 <span className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-forest text-white rounded-full">{cartCount}</span>
+              )}
+              {t === 'status' && activeOrders.length > 0 && (
+                <span className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-forest text-white rounded-full">{activeOrders.length}</span>
               )}
             </button>
           ))}
@@ -269,13 +326,17 @@ export default function GuestOrderClient({
           </div>
         )}
 
-        {/* Status */}
+        {/* Status — now from real DB data */}
         {tab === 'status' && (
           <div className="px-5 py-5">
-            {!orderId ? (
-              <div className="text-center py-16 text-charcoal/50 text-sm">No orders placed yet.</div>
+            {activeOrders.length === 0 ? (
+              <div className="text-center py-16 text-charcoal/50 text-sm">No active orders yet.</div>
             ) : (
-              <OrderStatusCard orderId={orderId} initialStatus={orderStatus ?? 'received'} />
+              <div className="space-y-3">
+                {activeOrders.map(o => (
+                  <OrderStatusCard key={o.id} order={o} />
+                ))}
+              </div>
             )}
           </div>
         )}
@@ -284,17 +345,22 @@ export default function GuestOrderClient({
   );
 }
 
-function OrderStatusCard({ orderId, initialStatus }: { orderId: string; initialStatus: string }) {
-  const [status, setStatus] = useState(initialStatus);
+function OrderStatusCard({ order }: { order: ActiveOrder }) {
   const stages = ['received', 'preparing', 'ready', 'served'];
-  const stageIdx = stages.indexOf(status);
-
-  useRealtimeOrderStatus(orderId, setStatus);
+  const stageIdx = stages.indexOf(order.status);
 
   return (
     <div className="bg-cream/50 rounded-lg p-4">
-      <div className="text-xs text-charcoal/60 mb-1">Order #{orderId.slice(0, 8)}</div>
-      <div className="font-serif text-xl mb-4">Your courses are on the way</div>
+      <div className="flex justify-between items-start mb-1">
+        <div className="text-xs text-charcoal/60">Order #{order.id.slice(0, 8)}</div>
+        <div className="text-xs font-medium">₹{Number(order.total).toLocaleString('en-IN')}</div>
+      </div>
+      <div className="font-serif text-lg mb-3">
+        {order.status === 'received' && 'Order received — kitchen will start soon'}
+        {order.status === 'preparing' && 'Your courses are being prepared'}
+        {order.status === 'ready' && 'Ready! Server bringing it now'}
+        {order.status === 'served' && 'Enjoy your meal 🍽️'}
+      </div>
       <div className="grid grid-cols-4 gap-1">
         {stages.map((s, i) => (
           <div key={s}>
@@ -305,22 +371,4 @@ function OrderStatusCard({ orderId, initialStatus }: { orderId: string; initialS
       </div>
     </div>
   );
-}
-
-function useRealtimeOrderStatus(orderId: string, onUpdate: (s: string) => void) {
-  if (typeof window === 'undefined') return;
-  if (!(window as any).__tablo_subbed_to?.[orderId]) {
-    (window as any).__tablo_subbed_to = (window as any).__tablo_subbed_to ?? {};
-    (window as any).__tablo_subbed_to[orderId] = true;
-    import('@/lib/supabase').then(({ supabase }) => {
-      supabase
-        .channel(`order-${orderId}`)
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders', filter: `id=eq.${orderId}` },
-          payload => {
-            const newStatus = (payload.new as any).status;
-            if (newStatus) onUpdate(newStatus);
-          })
-        .subscribe();
-    });
-  }
 }
