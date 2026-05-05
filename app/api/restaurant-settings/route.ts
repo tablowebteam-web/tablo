@@ -9,10 +9,9 @@ export async function PATCH(req: NextRequest) {
     if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
     const body = await req.json();
-    const { restaurantId, upi_id, upi_payee_name } = body;
+    const { restaurantId, upi_id, upi_payee_name, payment_mode } = body;
     if (!restaurantId) return NextResponse.json({ error: 'Missing restaurantId' }, { status: 400 });
 
-    // Verify membership
     const { data: membership } = await supabase
       .from('restaurant_members')
       .select('id')
@@ -26,6 +25,12 @@ export async function PATCH(req: NextRequest) {
     const updates: any = {};
     if (upi_id !== undefined) updates.upi_id = upi_id;
     if (upi_payee_name !== undefined) updates.upi_payee_name = upi_payee_name;
+    if (payment_mode !== undefined) {
+      if (!['pay_after', 'pay_first'].includes(payment_mode)) {
+        return NextResponse.json({ error: 'Invalid payment_mode' }, { status: 400 });
+      }
+      updates.payment_mode = payment_mode;
+    }
 
     const { data, error } = await admin
       .from('restaurants')

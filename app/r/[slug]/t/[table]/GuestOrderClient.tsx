@@ -30,7 +30,8 @@ export default function GuestOrderClient({
   categories,
   items,
   customerProfile,
-  initialActiveOrders = []
+  initialActiveOrders = [],
+  paymentMode = 'pay_after'
 }: {
   restaurant: Restaurant;
   table: RestaurantTable;
@@ -38,6 +39,7 @@ export default function GuestOrderClient({
   items: MenuItem[];
   customerProfile: { id: string; name: string | null } | null;
   initialActiveOrders?: ActiveOrder[];
+  paymentMode?: 'pay_after' | 'pay_first';
 }) {
   const [mode, setMode] = useState<Mode>('dine_in');
   const [tab, setTab] = useState<Tab>('menu');
@@ -51,6 +53,7 @@ export default function GuestOrderClient({
   const [submitting, setSubmitting] = useState(false);
   const [previewOffer, setPreviewOffer] = useState<PreviewOffer | null>(null);
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
+  const [pendingPayOrderId, setPendingPayOrderId] = useState<string | null>(null);
 
   // Currently active cart (based on mode)
   const cart = mode === 'dine_in' ? dineInCart : parcelCart;
@@ -194,6 +197,13 @@ export default function GuestOrderClient({
         // Clear ONLY the cart that was just ordered
         if (mode === 'dine_in') setDineInCart({});
         else setParcelCart({});
+
+        // PAY-FIRST: redirect to bill page immediately
+        if (data.requiresPayment) {
+          window.location.href = `/r/${restaurant.slug}/t/${table.number}/bill?orderId=${data.id}`;
+          return;
+        }
+
         setTab('status');
       } else {
         alert(data.error ?? 'Could not place order');
@@ -408,6 +418,7 @@ export default function GuestOrderClient({
                     previewOffer={mode === 'dine_in' ? previewOffer : null}
                     discount={mode === 'dine_in' ? discount : 0}
                     submitting={submitting}
+                    paymentMode={paymentMode}
                     onSwitch={() => setMode('dine_in')}
                     onPlaceOrder={placeOrder}
                   />
@@ -425,6 +436,7 @@ export default function GuestOrderClient({
                     previewOffer={mode === 'parcel' ? previewOffer : null}
                     discount={mode === 'parcel' ? discount : 0}
                     submitting={submitting}
+                    paymentMode={paymentMode}
                     onSwitch={() => setMode('parcel')}
                     onPlaceOrder={placeOrder}
                   />
@@ -448,7 +460,7 @@ export default function GuestOrderClient({
             ) : (
               <div className="space-y-3">
                 {activeOrders.map(o => <OrderStatusCard key={o.id} order={o} />)}
-                {activeOrders.some(o => o.order_type !== 'parcel') && (
+                {activeOrders.some(o => o.order_type !== 'parcel') && paymentMode !== 'pay_first' && (
                   <Link
                     href={`/r/${restaurant.slug}/t/${table.number}/bill`}
                     className="block w-full bg-charcoal text-white text-center py-3 rounded-md text-sm font-medium hover:bg-charcoal/90 mt-4"
@@ -500,6 +512,7 @@ function CartSection({
   previewOffer,
   discount,
   submitting,
+  paymentMode,
   onSwitch,
   onPlaceOrder
 }: {
@@ -512,6 +525,7 @@ function CartSection({
   previewOffer: PreviewOffer | null;
   discount: number;
   submitting: boolean;
+  paymentMode: 'pay_after' | 'pay_first';
   onSwitch: () => void;
   onPlaceOrder: () => void;
 }) {
@@ -567,7 +581,9 @@ function CartSection({
           ? `Switch to ${title.toLowerCase()} to order`
           : submitting
             ? 'Sending…'
-            : `Send ${title.toLowerCase()} to kitchen`}
+            : (paymentMode === 'pay_first'
+                ? `💸 Pay & send ${title.toLowerCase()} to kitchen`
+                : `Send ${title.toLowerCase()} to kitchen`)}
       </button>
     </div>
   );

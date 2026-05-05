@@ -16,7 +16,7 @@ export default async function GuestOrderPage({
     .from('restaurants')
     .select('*')
     .eq('slug', params.slug)
-    .single<Restaurant>();
+    .single<Restaurant & { payment_mode?: 'pay_after' | 'pay_first' | null }>();
   if (!restaurant) notFound();
 
   const tableNum = parseInt(params.table, 10);
@@ -54,7 +54,6 @@ export default async function GuestOrderPage({
     if (profile) {
       customerProfile = profile;
 
-      // Fetch BOTH dine-in (this table) AND parcel orders for this customer at this restaurant
       const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
       const { data: orders } = await supabase
         .from('orders')
@@ -66,7 +65,6 @@ export default async function GuestOrderPage({
         .order('created_at', { ascending: false })
         .limit(10);
 
-      // Filter: include all parcel orders + dine-in orders for THIS table
       activeOrders = (orders ?? []).filter(o =>
         o.order_type === 'parcel' || o.table_number === tableNum
       );
@@ -81,6 +79,7 @@ export default async function GuestOrderPage({
       items={(items ?? []) as MenuItem[]}
       customerProfile={customerProfile}
       initialActiveOrders={activeOrders}
+      paymentMode={restaurant.payment_mode ?? 'pay_after'}
     />
   );
 }

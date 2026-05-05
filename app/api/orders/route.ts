@@ -22,20 +22,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    // Validate dine_in vs parcel constraints
     if (orderType === 'dine_in' && !tableId) {
       return NextResponse.json({ error: 'Dine-in orders need a table' }, { status: 400 });
     }
 
     const admin = createAdminClient();
 
-    // Get restaurant tax rate
+    // Get restaurant settings INCLUDING payment_mode
     const { data: restaurant } = await admin
       .from('restaurants')
-      .select('tax_rate')
+      .select('tax_rate, payment_mode')
       .eq('id', restaurantId)
       .single();
     const taxRate = Number(restaurant?.tax_rate ?? 5);
+    const paymentMode = restaurant?.payment_mode ?? 'pay_after';
 
     // Compute discount if customer logged in
     let discountAmount = 0;
@@ -86,7 +86,15 @@ export async function POST(req: NextRequest) {
       pickupCode = codeResult ?? `P-${Date.now().toString().slice(-4)}`;
     }
 
-    // Insert order
+    // Determine initial status & payment_state based on mode
+    let initialStatus = 'received';
+    let initialPaymentState: 'not_required' | 'pending' = 'not_required';
+
+    if (paymentMode === 'pay_first') {
+      initialStatus = 'received'; // Stays "received" but kitchen filter excludes pending payment
+      initialPaymentState = 'pending';
+    }
+
     const { data: order, error: orderErr } = await admin
       .from('orders')
       .insert({
@@ -99,7 +107,8 @@ export async function POST(req: NextRequest) {
         order_type: orderType,
         pickup_code: pickupCode,
         notes: notes ?? null,
-        status: 'received',
+        status: initialStatus,
+        payment_state: initialPaymentState,
         subtotal: subtotalNum,
         tax,
         total,
@@ -113,7 +122,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: orderErr?.message ?? 'Order insert failed' }, { status: 500 });
     }
 
-    // Insert order items
     const orderItems = items.map((it: any) => ({
       order_id: order.id,
       menu_item_id: it.menuItemId,
@@ -124,7 +132,6 @@ export async function POST(req: NextRequest) {
     const { error: itemsErr } = await admin.from('order_items').insert(orderItems);
     if (itemsErr) return NextResponse.json({ error: itemsErr.message }, { status: 500 });
 
-    // Record visit if customer logged in
     if (customerId) {
       try {
         await admin.from('customer_visits').insert({
@@ -140,12 +147,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       id: order.id,
       status: order.status,
+      paymentState: order.payment_state,
+      paymentMode,
       orderType,
       pickupCode,
       discountAmount,
       appliedOffer,
       tax,
-      total
+      total,
+      requiresPayment: paymentMode === 'pay_first'
     });
   } catch (e: any) {
     return NextResponse.json({ error: e.message ?? 'Unknown error' }, { status: 500 });

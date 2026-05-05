@@ -39,6 +39,7 @@ export default function KitchenClient({
             .select('*, order_items(*)')
             .eq('restaurant_id', restaurant.id)
             .in('status', ['received', 'preparing', 'ready'])
+            .neq('payment_state', 'pending')
             .order('created_at', { ascending: true });
           setOrders((data ?? []) as KOrder[]);
         }
