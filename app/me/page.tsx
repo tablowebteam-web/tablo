@@ -16,7 +16,6 @@ export default async function CustomerMePage() {
     .eq('user_id', user.id)
     .maybeSingle();
 
-  // If no profile yet, create empty one (first-time customer)
   if (!profile) {
     const { data: created } = await supabase
       .from('customer_profiles')
@@ -26,19 +25,31 @@ export default async function CustomerMePage() {
     profile = created;
   }
 
-  // Get order history (orders linked to this customer)
-  const { data: orders } = await supabase
+  // Active parcel orders (last 4 hours, not yet served/paid)
+  const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
+  const { data: activeParcels } = await supabase
     .from('orders')
-    .select('id, total, status, created_at, table_number, restaurants(name, slug)')
+    .select('id, total, status, pickup_code, created_at, restaurants(name, slug)')
+    .eq('customer_id', profile?.id)
+    .eq('order_type', 'parcel')
+    .gte('created_at', fourHoursAgo)
+    .in('status', ['received', 'preparing', 'ready'])
+    .order('created_at', { ascending: false });
+
+  // All past orders (last 30) — both dine-in and parcel
+  const { data: allOrders } = await supabase
+    .from('orders')
+    .select('id, total, status, created_at, table_number, pickup_code, order_type, restaurants(name, slug)')
     .eq('customer_id', profile?.id)
     .order('created_at', { ascending: false })
-    .limit(20);
+    .limit(30);
 
   return (
     <CustomerProfileClient
       userEmail={user.email ?? ''}
       profile={profile!}
-      orders={(orders ?? []) as any[]}
+      activeParcels={(activeParcels ?? []) as any[]}
+      orders={(allOrders ?? []) as any[]}
     />
   );
 }

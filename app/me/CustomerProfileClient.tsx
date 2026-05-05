@@ -12,27 +12,42 @@ interface Profile {
   anniversary: string | null;
 }
 
+interface ActiveParcel {
+  id: string;
+  total: number;
+  status: string;
+  pickup_code: string | null;
+  created_at: string;
+  restaurants: { name: string; slug: string } | null;
+}
+
 interface OrderRow {
   id: string;
   total: number;
   status: string;
   created_at: string;
   table_number: number | null;
+  pickup_code: string | null;
+  order_type: string | null;
   restaurants: { name: string; slug: string } | null;
 }
+
+type HistoryTab = 'all' | 'dine_in' | 'parcel';
 
 export default function CustomerProfileClient({
   userEmail,
   profile: initialProfile,
+  activeParcels,
   orders
 }: {
   userEmail: string;
   profile: Profile;
+  activeParcels: ActiveParcel[];
   orders: OrderRow[];
 }) {
   const router = useRouter();
   const params = useSearchParams();
-  const returnTo = params.get('returnTo'); // e.g. /r/sahiba/t/7
+  const returnTo = params.get('returnTo');
 
   const [profile, setProfile] = useState(initialProfile);
   const [name, setName] = useState(profile.name ?? '');
@@ -42,8 +57,36 @@ export default function CustomerProfileClient({
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [historyTab, setHistoryTab] = useState<HistoryTab>('all');
+  const [parcels, setParcels] = useState(activeParcels);
 
-  // If we have a returnTo, also stash it in a cookie so the user can pick a "Continue to menu" path even after refresh
+  // Realtime updates for active parcel orders
+  useEffect(() => {
+    if (parcels.length === 0) return;
+    const orderIds = parcels.map(p => p.id);
+    let mounted = true;
+
+    import('@/lib/supabase').then(({ supabase }) => {
+      const channel = supabase
+        .channel(`profile-parcels-${profile.id}`)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders' }, payload => {
+          if (!mounted) return;
+          const updated = payload.new as any;
+          if (orderIds.includes(updated.id)) {
+            setParcels(prev =>
+              prev
+                .map(p => p.id === updated.id ? { ...p, status: updated.status, total: Number(updated.total) } : p)
+                .filter(p => !['paid', 'cancelled', 'served'].includes(p.status))
+            );
+          }
+        })
+        .subscribe();
+      return () => { supabase.removeChannel(channel); };
+    });
+
+    return () => { mounted = false; };
+  }, [parcels.map(p => p.id).join(','), profile.id]);
+
   useEffect(() => {
     if (returnTo) {
       document.cookie = `tablo_return_to=${encodeURIComponent(returnTo)}; path=/; max-age=3600; samesite=lax`;
@@ -76,7 +119,6 @@ export default function CustomerProfileClient({
           anniversary: anniversary || null
         })
       });
-
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         const msg = err.error ?? `Save failed (HTTP ${res.status})`;
@@ -85,7 +127,6 @@ export default function CustomerProfileClient({
         setSaving(false);
         return;
       }
-
       const updated = await res.json();
       setProfile(updated);
       show('Profile saved ✓');
@@ -93,7 +134,6 @@ export default function CustomerProfileClient({
       if (thenRedirect) {
         const dest = returnTo ?? readReturnCookie();
         if (dest) {
-          // Clear cookie and go
           document.cookie = 'tablo_return_to=; path=/; max-age=0';
           setTimeout(() => router.push(dest), 600);
         }
@@ -115,6 +155,13 @@ export default function CustomerProfileClient({
   const initials = (name || userEmail || 'U').slice(0, 2).toUpperCase();
   const cookieReturnTo = typeof window !== 'undefined' ? readReturnCookie() : null;
   const effectiveReturnTo = returnTo ?? cookieReturnTo;
+
+  // Filter orders by tab
+  const filteredOrders = orders.filter(o => {
+    if (historyTab === 'all') return true;
+    if (historyTab === 'parcel') return o.order_type === 'parcel';
+    return o.order_type !== 'parcel'; // dine_in or null (legacy orders)
+  });
 
   return (
     <main className="min-h-screen bg-[#FBFAF7]">
@@ -141,7 +188,6 @@ export default function CustomerProfileClient({
       </header>
 
       <div className="max-w-2xl mx-auto px-5 py-6">
-        {/* Welcome banner — only on first visit when there's a returnTo */}
         {effectiveReturnTo && !profile.name && (
           <div className="bg-cream/70 border border-cream rounded-lg p-4 mb-5 text-sm text-forest">
             🎉 <strong>Welcome to Tablo!</strong> Add your details below and we'll bring you back to the menu when you're done.
@@ -158,6 +204,22 @@ export default function CustomerProfileClient({
           </div>
         </div>
 
+        {/* ============ ACTIVE PARCEL ORDERS (TOP PRIORITY) ============ */}
+        {parcels.length > 0 && (
+          <div className="mb-5">
+            <h2 className="font-serif text-lg mb-3 flex items-center gap-2">
+              📦 Your active parcel orders
+              <span className="text-xs bg-forest text-white px-2 py-0.5 rounded-full font-sans">{parcels.length}</span>
+            </h2>
+            <div className="space-y-2">
+              {parcels.map(p => (
+                <ActiveParcelCard key={p.id} parcel={p} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ============ PROFILE FORM ============ */}
         <div className="bg-white border border-charcoal/10 rounded-lg p-5 mb-5">
           <h2 className="font-serif text-lg mb-1">Your profile</h2>
           <p className="text-xs text-charcoal/60 mb-4">
@@ -194,7 +256,6 @@ export default function CustomerProfileClient({
                   className="w-full px-3 py-2 border border-charcoal/15 rounded-md text-sm focus:outline-none focus:border-forest focus:ring-1 focus:ring-forest"
                 />
               </Field>
-
               <Field label="Anniversary">
                 <input
                   type="date"
@@ -207,59 +268,84 @@ export default function CustomerProfileClient({
           </div>
 
           {error && (
-            <div className="mt-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2">
-              {error}
-            </div>
+            <div className="mt-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2">{error}</div>
           )}
 
           <div className="flex gap-2 mt-5">
             {effectiveReturnTo ? (
               <>
-                <button
-                  onClick={() => save(false)}
-                  disabled={saving}
-                  className="px-4 py-2.5 border border-charcoal/20 rounded-md text-sm font-medium hover:bg-charcoal/5 disabled:opacity-50"
-                >
+                <button onClick={() => save(false)} disabled={saving} className="px-4 py-2.5 border border-charcoal/20 rounded-md text-sm font-medium hover:bg-charcoal/5 disabled:opacity-50">
                   {saving ? 'Saving…' : 'Save'}
                 </button>
-                <button
-                  onClick={() => save(true)}
-                  disabled={saving}
-                  className="flex-1 bg-forest text-white py-2.5 rounded-md text-sm font-medium hover:bg-forest/90 disabled:opacity-50"
-                >
+                <button onClick={() => save(true)} disabled={saving} className="flex-1 bg-forest text-white py-2.5 rounded-md text-sm font-medium hover:bg-forest/90 disabled:opacity-50">
                   {saving ? 'Saving…' : 'Save & continue to menu →'}
                 </button>
               </>
             ) : (
-              <button
-                onClick={() => save(false)}
-                disabled={saving}
-                className="w-full bg-forest text-white py-2.5 rounded-md text-sm font-medium hover:bg-forest/90 disabled:opacity-50"
-              >
+              <button onClick={() => save(false)} disabled={saving} className="w-full bg-forest text-white py-2.5 rounded-md text-sm font-medium hover:bg-forest/90 disabled:opacity-50">
                 {saving ? 'Saving…' : 'Save profile'}
               </button>
             )}
           </div>
         </div>
 
+        {/* ============ ORDER HISTORY WITH TABS ============ */}
         <div>
           <h2 className="font-serif text-lg mb-3">Order history</h2>
 
-          {orders.length === 0 ? (
+          {/* Tabs */}
+          <div className="flex gap-1.5 mb-3">
+            {(['all', 'dine_in', 'parcel'] as HistoryTab[]).map(t => {
+              const count = orders.filter(o => {
+                if (t === 'all') return true;
+                if (t === 'parcel') return o.order_type === 'parcel';
+                return o.order_type !== 'parcel';
+              }).length;
+              return (
+                <button
+                  key={t}
+                  onClick={() => setHistoryTab(t)}
+                  className={`px-3 py-1.5 text-xs rounded-full border transition-colors ${
+                    historyTab === t
+                      ? 'bg-charcoal text-white border-charcoal'
+                      : 'bg-white text-charcoal/70 border-charcoal/20'
+                  }`}
+                >
+                  {t === 'all' ? 'All' : t === 'dine_in' ? '🍽️ Dine-in' : '📦 Parcel'}
+                  <span className={`ml-1.5 ${historyTab === t ? 'text-white/70' : 'text-charcoal/40'}`}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {filteredOrders.length === 0 ? (
             <div className="bg-white border border-charcoal/10 rounded-lg p-8 text-center">
-              <div className="text-4xl mb-2">🍽️</div>
-              <div className="font-serif text-base mb-1">No orders yet</div>
+              <div className="text-4xl mb-2">{historyTab === 'parcel' ? '📦' : '🍽️'}</div>
+              <div className="font-serif text-base mb-1">
+                {historyTab === 'parcel' ? 'No parcel orders yet' : historyTab === 'dine_in' ? 'No dine-in orders yet' : 'No orders yet'}
+              </div>
               <div className="text-xs text-charcoal/60">Your past orders will appear here once you start dining.</div>
             </div>
           ) : (
             <div className="space-y-2">
-              {orders.map(o => (
+              {filteredOrders.map(o => (
                 <div key={o.id} className="bg-white border border-charcoal/10 rounded-lg p-4">
                   <div className="flex justify-between items-start gap-3">
                     <div className="min-w-0">
-                      <div className="font-medium text-sm truncate">{o.restaurants?.name ?? 'Restaurant'}</div>
-                      <div className="text-xs text-charcoal/60 mt-0.5">
-                        Table {o.table_number ?? '?'} · {new Date(o.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span className="font-medium text-sm truncate">{o.restaurants?.name ?? 'Restaurant'}</span>
+                        {o.order_type === 'parcel' && (
+                          <span className="text-[9px] tracking-wide bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">📦 PARCEL</span>
+                        )}
+                      </div>
+                      <div className="text-xs text-charcoal/60">
+                        {o.order_type === 'parcel'
+                          ? `Pickup ${o.pickup_code ?? '—'}`
+                          : `Table ${o.table_number ?? '?'}`}
+                        <span className="mx-1.5">·</span>
+                        {new Date(o.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
                       </div>
                     </div>
                     <div className="text-right shrink-0">
@@ -286,6 +372,67 @@ export default function CustomerProfileClient({
       )}
     </main>
   );
+}
+
+function ActiveParcelCard({ parcel }: { parcel: ActiveParcel }) {
+  const stages = ['received', 'preparing', 'ready'];
+  const stageIdx = stages.indexOf(parcel.status);
+  const isReady = parcel.status === 'ready';
+
+  return (
+    <div className={`rounded-lg p-4 border-2 ${
+      isReady ? 'bg-emerald-50 border-emerald-300 animate-pulse' : 'bg-cream/50 border-cream'
+    }`}>
+      <div className="flex justify-between items-start mb-2">
+        <div className="min-w-0">
+          <div className="text-xs text-charcoal/60 truncate">
+            {parcel.restaurants?.name ?? 'Restaurant'}
+          </div>
+          <div className="font-serif text-3xl text-forest leading-tight mt-0.5">
+            {parcel.pickup_code ?? '—'}
+          </div>
+        </div>
+        <div className="text-right shrink-0">
+          <div className="text-sm font-medium">₹{Number(parcel.total).toLocaleString('en-IN')}</div>
+          <div className="text-[10px] text-charcoal/50 mt-0.5">
+            {timeAgo(parcel.created_at)}
+          </div>
+        </div>
+      </div>
+
+      <div className={`font-serif text-sm mb-3 ${isReady ? 'text-emerald-800 font-bold' : 'text-charcoal'}`}>
+        {parcel.status === 'received' && 'Order received — chef will start soon'}
+        {parcel.status === 'preparing' && 'Being prepared in the kitchen'}
+        {parcel.status === 'ready' && '🎉 Ready! Show this code at the counter'}
+      </div>
+
+      <div className="grid grid-cols-3 gap-1 mb-2">
+        {stages.map((s, i) => (
+          <div key={s}>
+            <div className={`h-1 rounded-full ${i <= stageIdx ? 'bg-forest' : 'bg-charcoal/15'}`} />
+            <div className={`text-[10px] mt-1.5 capitalize text-center ${i <= stageIdx ? 'text-forest font-medium' : 'text-charcoal/40'}`}>{s}</div>
+          </div>
+        ))}
+      </div>
+
+      {parcel.restaurants?.slug && (
+        <Link
+          href={`/r/${parcel.restaurants.slug}/parcel`}
+          className="text-[11px] text-forest hover:underline block text-center mt-2"
+        >
+          Order more from {parcel.restaurants.name} →
+        </Link>
+      )}
+    </div>
+  );
+}
+
+function timeAgo(iso: string): string {
+  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min${mins !== 1 ? 's' : ''} ago`;
+  const hrs = Math.floor(mins / 60);
+  return `${hrs} hr${hrs !== 1 ? 's' : ''} ago`;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
