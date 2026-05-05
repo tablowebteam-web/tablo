@@ -22,9 +22,10 @@ export default async function AdminPage() {
 
   if (restaurants.length === 0) redirect('/onboarding');
 
-  // Pending payment counts per restaurant
   const admin = createAdminClient();
   const restaurantIds = restaurants.map((r: any) => r.id);
+
+  // Pending payment counts
   const { data: pendingPayments } = await admin
     .from('payment_intents')
     .select('restaurant_id')
@@ -34,6 +35,20 @@ export default async function AdminPage() {
   const pendingMap = new Map<string, number>();
   for (const p of pendingPayments ?? []) {
     pendingMap.set(p.restaurant_id, (pendingMap.get(p.restaurant_id) ?? 0) + 1);
+  }
+
+  // Today's reservation counts
+  const today = new Date().toISOString().slice(0, 10);
+  const { data: todayReservations } = await admin
+    .from('reservations')
+    .select('restaurant_id')
+    .in('restaurant_id', restaurantIds)
+    .eq('reservation_date', today)
+    .in('status', ['confirmed', 'pending', 'arrived']);
+
+  const reservationsMap = new Map<string, number>();
+  for (const r of todayReservations ?? []) {
+    reservationsMap.set(r.restaurant_id, (reservationsMap.get(r.restaurant_id) ?? 0) + 1);
   }
 
   return (
@@ -50,6 +65,7 @@ export default async function AdminPage() {
         <div className="space-y-3">
           {restaurants.map((r: any) => {
             const pending = pendingMap.get(r.id) ?? 0;
+            const todayBookings = reservationsMap.get(r.id) ?? 0;
             return (
               <div key={r.id} className="border border-charcoal/10 rounded-lg p-4 bg-white">
                 <div className="flex justify-between items-start flex-wrap gap-3">
@@ -62,6 +78,12 @@ export default async function AdminPage() {
                   </div>
                   <div className="flex gap-2 flex-wrap">
                     <Link href={`/admin/${r.slug}/insights`} className="px-3 py-1.5 text-sm bg-forest text-white rounded hover:bg-forest/90">📊 Insights</Link>
+                    <Link href={`/admin/${r.slug}/reservations`} className="px-3 py-1.5 text-sm border border-charcoal/20 rounded hover:bg-charcoal/5 relative">
+                      📅 Reservations
+                      {todayBookings > 0 && (
+                        <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-[9px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{todayBookings}</span>
+                      )}
+                    </Link>
                     <Link href={`/admin/${r.slug}/payments`} className="px-3 py-1.5 text-sm border border-charcoal/20 rounded hover:bg-charcoal/5 relative">
                       💸 Payments
                       {pending > 0 && (
@@ -71,8 +93,8 @@ export default async function AdminPage() {
                     <Link href={`/admin/${r.slug}/walk-in`} className="px-3 py-1.5 text-sm bg-amber-700 text-white rounded hover:bg-amber-800">📦 Walk-in</Link>
                     <Link href={`/admin/${r.slug}/menu`} className="px-3 py-1.5 text-sm border border-charcoal/20 rounded hover:bg-charcoal/5">Menu</Link>
                     <Link href={`/admin/${r.slug}/offers`} className="px-3 py-1.5 text-sm border border-charcoal/20 rounded hover:bg-charcoal/5">Offers</Link>
-                    <Link href={`/admin/${r.slug}/qr`} className="px-3 py-1.5 text-sm border border-charcoal/20 rounded hover:bg-charcoal/5">QR codes</Link>
                     <Link href={`/admin/${r.slug}/orders`} className="px-3 py-1.5 text-sm border border-charcoal/20 rounded hover:bg-charcoal/5">Orders</Link>
+                    <Link href={`/admin/${r.slug}/qr`} className="px-3 py-1.5 text-sm border border-charcoal/20 rounded hover:bg-charcoal/5">QR</Link>
                     <Link href={`/admin/${r.slug}/settings`} className="px-3 py-1.5 text-sm border border-charcoal/20 rounded hover:bg-charcoal/5">⚙️</Link>
                   </div>
                 </div>
