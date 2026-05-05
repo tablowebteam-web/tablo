@@ -12,7 +12,6 @@ export default async function GuestOrderPage({
 }) {
   const supabase = createServerSupabase();
 
-  // Restaurant
   const { data: restaurant } = await supabase
     .from('restaurants')
     .select('*')
@@ -20,7 +19,6 @@ export default async function GuestOrderPage({
     .single<Restaurant>();
   if (!restaurant) notFound();
 
-  // Table
   const tableNum = parseInt(params.table, 10);
   const { data: table } = await supabase
     .from('restaurant_tables')
@@ -30,7 +28,6 @@ export default async function GuestOrderPage({
     .single<RestaurantTable>();
   if (!table) notFound();
 
-  // Menu
   const { data: categories } = await supabase
     .from('menu_categories')
     .select('*')
@@ -44,7 +41,6 @@ export default async function GuestOrderPage({
     .eq('is_available', true)
     .order('sort_order');
 
-  // Optional: customer profile if logged in
   const { data: { user } } = await supabase.auth.getUser();
   let customerProfile: { id: string; name: string | null } | null = null;
   let activeOrders: any[] = [];
@@ -58,20 +54,22 @@ export default async function GuestOrderPage({
     if (profile) {
       customerProfile = profile;
 
-      // Fetch active orders for this customer at this restaurant in the last 4 hours
-      // (covers the typical dining window — anything older is unlikely to be relevant)
+      // Fetch BOTH dine-in (this table) AND parcel orders for this customer at this restaurant
       const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
       const { data: orders } = await supabase
         .from('orders')
-        .select('id, status, total, table_number, created_at')
+        .select('id, status, total, table_number, pickup_code, order_type, created_at')
         .eq('customer_id', profile.id)
         .eq('restaurant_id', restaurant.id)
-        .eq('table_number', tableNum)
         .gte('created_at', fourHoursAgo)
         .in('status', ['received', 'preparing', 'ready', 'served'])
         .order('created_at', { ascending: false })
-        .limit(5);
-      activeOrders = orders ?? [];
+        .limit(10);
+
+      // Filter: include all parcel orders + dine-in orders for THIS table
+      activeOrders = (orders ?? []).filter(o =>
+        o.order_type === 'parcel' || o.table_number === tableNum
+      );
     }
   }
 
