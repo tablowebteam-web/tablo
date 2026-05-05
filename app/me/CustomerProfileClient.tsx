@@ -32,18 +32,30 @@ interface OrderRow {
   restaurants: { name: string; slug: string } | null;
 }
 
+interface UpcomingReservation {
+  id: string;
+  confirmation_code: string;
+  reservation_date: string;
+  reservation_time: string;
+  party_size: number;
+  status: string;
+  restaurants: { name: string; slug: string } | null;
+}
+
 type HistoryTab = 'all' | 'dine_in' | 'parcel';
 
 export default function CustomerProfileClient({
   userEmail,
   profile: initialProfile,
   activeParcels,
-  orders
+  orders,
+  upcomingReservations = []
 }: {
   userEmail: string;
   profile: Profile;
   activeParcels: ActiveParcel[];
   orders: OrderRow[];
+  upcomingReservations?: UpcomingReservation[];
 }) {
   const router = useRouter();
   const params = useSearchParams();
@@ -289,6 +301,43 @@ export default function CustomerProfileClient({
           </div>
         </div>
 
+        {/* ============ UPCOMING RESERVATIONS ============ */}
+        {upcomingReservations.length > 0 && (
+          <div className="mb-5">
+            <div className="flex justify-between items-center mb-3">
+              <h2 className="font-serif text-lg flex items-center gap-2">
+                📅 Upcoming reservations
+              </h2>
+              <Link href="/me/reservations" className="text-xs text-forest hover:underline">
+                View all →
+              </Link>
+            </div>
+            <div className="space-y-2">
+              {upcomingReservations.slice(0, 3).map(r => (
+                <Link
+                  key={r.id}
+                  href={`/me/reservations/${r.confirmation_code}`}
+                  className="block bg-white border border-charcoal/15 rounded-lg p-3 hover:border-forest"
+                >
+                  <div className="flex justify-between items-start gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium text-sm truncate">{r.restaurants?.name ?? 'Restaurant'}</div>
+                      <div className="text-xs text-charcoal/60 mt-0.5">
+                        {formatReservationDate(r.reservation_date)} · {formatReservationTime(r.reservation_time)} · {r.party_size} {r.party_size === 1 ? 'guest' : 'guests'}
+                      </div>
+                    </div>
+                    <span className={`text-[10px] px-2 py-0.5 rounded uppercase tracking-wide font-medium ${
+                      r.status === 'confirmed' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                    }`}>
+                      {r.status === 'confirmed' ? 'Confirmed' : 'Pending'}
+                    </span>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* ============ ORDER HISTORY WITH TABS ============ */}
         <div>
           <h2 className="font-serif text-lg mb-3">Order history</h2>
@@ -442,4 +491,21 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       {children}
     </div>
   );
+}
+
+function formatReservationDate(d: string): string {
+  const today = new Date().toISOString().slice(0, 10);
+  if (d === today) return 'Today';
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  if (d === tomorrow.toISOString().slice(0, 10)) return 'Tomorrow';
+  const dt = new Date(d + 'T12:00:00');
+  return dt.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
+function formatReservationTime(t: string): string {
+  const [h, m] = t.split(':').map(Number);
+  const period = h >= 12 ? 'PM' : 'AM';
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return `${h12}:${m.toString().padStart(2, '0')} ${period}`;
 }

@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase';
 
-// GET /api/reservations/slots?restaurantId=...&date=YYYY-MM-DD&partySize=4
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const restaurantId = searchParams.get('restaurantId');
     const date = searchParams.get('date');
     const partySize = Number(searchParams.get('partySize') ?? 2);
+    const excludeReservationId = searchParams.get('excludeReservationId'); // for edit flow
 
     if (!restaurantId || !date) {
       return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
@@ -15,10 +15,9 @@ export async function GET(req: NextRequest) {
 
     const admin = createAdminClient();
 
-    // Get restaurant booking config
     const { data: restaurant } = await admin
       .from('restaurants')
-      .select('booking_enabled, booking_opens_hours, booking_closes_hours, booking_slot_minutes, booking_lead_time_minutes, booking_advance_days')
+      .select('booking_enabled, booking_opens_hours, booking_closes_hours, booking_slot_minutes, booking_lead_time_minutes')
       .eq('id', restaurantId)
       .maybeSingle();
 
@@ -31,26 +30,27 @@ export async function GET(req: NextRequest) {
     const slotMins = restaurant.booking_slot_minutes ?? 30;
     const leadMins = restaurant.booking_lead_time_minutes ?? 60;
 
-    // Get total tables capacity
     const { data: tables } = await admin
       .from('restaurant_tables')
       .select('capacity')
       .eq('restaurant_id', restaurantId);
 
     const totalCapacity = (tables ?? []).reduce((s, t) => s + Number(t.capacity ?? 0), 0);
-    if (totalCapacity === 0) {
-      return NextResponse.json({ slots: [] });
-    }
+    if (totalCapacity === 0) return NextResponse.json({ slots: [] });
 
-    // Get existing reservations for that date
-    const { data: existingReservations } = await admin
+    let query = admin
       .from('reservations')
-      .select('reservation_time, party_size, duration_minutes')
+      .select('id, reservation_time, party_size, duration_minutes')
       .eq('restaurant_id', restaurantId)
       .eq('reservation_date', date)
       .in('status', ['confirmed', 'pending', 'arrived']);
 
-    // Build all possible slots between opens and closes
+    if (excludeReservationId) {
+      query = query.neq('id', excludeReservationId);
+    }
+
+    const { data: existingReservations } = await query;
+
     const allSlots: string[] = [];
     for (let hour = opensH; hour < closesH; hour++) {
       for (let min = 0; min < 60; min += slotMins) {
@@ -58,7 +58,6 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Filter out slots in the past (with lead time)
     const now = new Date();
     const minBookableTime = new Date(now.getTime() + leadMins * 60 * 1000);
     const isToday = date === now.toISOString().slice(0, 10);
@@ -66,15 +65,12 @@ export async function GET(req: NextRequest) {
     const availableSlots = allSlots.filter(slot => {
       const [h, m] = slot.split(':').map(Number);
 
-      // Check lead time
       if (isToday) {
         const slotDate = new Date();
         slotDate.setHours(h, m, 0, 0);
         if (slotDate < minBookableTime) return false;
       }
 
-      // Calculate occupied capacity at this slot
-      // A reservation occupies capacity from its start time to start + duration
       const slotMinutes = h * 60 + m;
       let occupiedSeats = 0;
 
@@ -83,15 +79,12 @@ export async function GET(req: NextRequest) {
         const rStart = rh * 60 + rm;
         const rEnd = rStart + Number(r.duration_minutes ?? 90);
 
-        // Does this reservation overlap with the requested slot?
-        // Slot duration assumed = same as restaurant slot duration for simplicity
-        const slotEnd = slotMinutes + 90;  // assume guest stays 90 mins
+        const slotEnd = slotMinutes + 90;
         if (slotMinutes < rEnd && slotEnd > rStart) {
           occupiedSeats += Number(r.party_size);
         }
       }
 
-      // Is there enough capacity left for this party?
       return totalCapacity - occupiedSeats >= partySize;
     });
 
