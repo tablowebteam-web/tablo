@@ -448,6 +448,14 @@ export default function GuestOrderClient({
             ) : (
               <div className="space-y-3">
                 {activeOrders.map(o => <OrderStatusCard key={o.id} order={o} />)}
+                {activeOrders.some(o => o.order_type !== 'parcel') && (
+                  <Link
+                    href={`/r/${restaurant.slug}/t/${table.number}/bill`}
+                    className="block w-full bg-charcoal text-white text-center py-3 rounded-md text-sm font-medium hover:bg-charcoal/90 mt-4"
+                  >
+                    💸 Request bill & pay
+                  </Link>
+                )}
               </div>
             )}
           </div>
