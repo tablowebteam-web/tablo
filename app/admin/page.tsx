@@ -35,8 +35,8 @@ export default async function AdminPage() {
         <div className="space-y-3">
           {restaurants.map((r: any) => (
             <div key={r.id} className="border border-charcoal/10 rounded-lg p-4 bg-white">
-              <div className="flex justify-between items-center flex-wrap gap-3">
-                <div>
+              <div className="flex justify-between items-start flex-wrap gap-3">
+                <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="font-serif text-xl">{r.name}</span>
                     <span className="text-[10px] tracking-wider bg-cream text-forest px-2 py-0.5 rounded uppercase">{r.role}</span>
@@ -45,6 +45,7 @@ export default async function AdminPage() {
                 </div>
                 <div className="flex gap-2 flex-wrap">
                   <Link href={`/admin/${r.slug}/insights`} className="px-3 py-1.5 text-sm bg-forest text-white rounded hover:bg-forest/90">📊 Insights</Link>
+                  <Link href={`/admin/${r.slug}/walk-in`} className="px-3 py-1.5 text-sm bg-amber-700 text-white rounded hover:bg-amber-800">📦 Walk-in</Link>
                   <Link href={`/admin/${r.slug}/menu`} className="px-3 py-1.5 text-sm border border-charcoal/20 rounded hover:bg-charcoal/5">Menu</Link>
                   <Link href={`/admin/${r.slug}/offers`} className="px-3 py-1.5 text-sm border border-charcoal/20 rounded hover:bg-charcoal/5">Offers</Link>
                   <Link href={`/admin/${r.slug}/qr`} className="px-3 py-1.5 text-sm border border-charcoal/20 rounded hover:bg-charcoal/5">QR codes</Link>

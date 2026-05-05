@@ -7,6 +7,10 @@ import type { Restaurant } from '@/lib/types';
 interface KOrder {
   id: string;
   table_number: number | null;
+  order_type: string | null;
+  pickup_code: string | null;
+  customer_name: string | null;
+  customer_phone: string | null;
   status: string;
   total: number;
   created_at: string;
@@ -30,7 +34,6 @@ export default function KitchenClient({
         'postgres_changes',
         { event: '*', schema: 'public', table: 'orders', filter: `restaurant_id=eq.${restaurant.id}` },
         async () => {
-          // Refetch on any order change
           const { data } = await supabase
             .from('orders')
             .select('*, order_items(*)')
@@ -42,9 +45,7 @@ export default function KitchenClient({
       )
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [restaurant.id]);
 
   async function setStatus(id: string, status: string) {
@@ -135,34 +136,62 @@ function Column({
             None
           </div>
         )}
-        {orders.map(o => (
-          <div key={o.id} className="bg-white/5 rounded-lg p-4 border border-white/10">
-            <div className="flex justify-between items-start mb-2">
-              <div>
-                <div className="font-serif text-2xl leading-none">T{o.table_number}</div>
-                <div className="text-[11px] text-white/50 mt-1">#{o.id.slice(0, 6)} · {elapsed(o.created_at)}</div>
-              </div>
-              <div className="text-sm font-medium">₹{o.total}</div>
-            </div>
-            <div className="space-y-1 mt-3">
-              {o.order_items.map(it => (
-                <div key={it.id} className="flex justify-between text-sm">
-                  <span>{it.name}</span>
-                  <span className="text-white/60">×{it.qty}</span>
-                </div>
-              ))}
-            </div>
-            {o.notes && (
-              <div className="mt-3 p-2 bg-amber-500/10 text-amber-200 text-xs rounded">{o.notes}</div>
-            )}
-            <button
-              onClick={() => onAction(o.id)}
-              className="w-full mt-4 bg-white text-charcoal py-2 rounded-md text-sm font-medium hover:bg-white/90"
+        {orders.map(o => {
+          const isParcel = o.order_type === 'parcel';
+          return (
+            <div
+              key={o.id}
+              className={`rounded-lg p-4 border ${
+                isParcel ? 'bg-amber-500/10 border-amber-500/30' : 'bg-white/5 border-white/10'
+              }`}
             >
-              {actionLabel}
-            </button>
-          </div>
-        ))}
+              <div className="flex justify-between items-start mb-2">
+                <div>
+                  {isParcel ? (
+                    <>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[10px] bg-amber-500 text-charcoal font-bold px-1.5 py-0.5 rounded tracking-wide">📦 PARCEL</span>
+                      </div>
+                      <div className="font-serif text-2xl leading-none">{o.pickup_code ?? '—'}</div>
+                      {o.customer_name && (
+                        <div className="text-xs text-white/70 mt-1">
+                          {o.customer_name}
+                          {o.customer_phone && ` · ${o.customer_phone}`}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <div className="font-serif text-2xl leading-none">T{o.table_number}</div>
+                      <div className="text-[11px] text-white/50 mt-1">#{o.id.slice(0, 6)} · {elapsed(o.created_at)}</div>
+                    </>
+                  )}
+                </div>
+                <div className="text-sm font-medium">₹{o.total}</div>
+              </div>
+              {isParcel && (
+                <div className="text-[11px] text-white/40 mt-1 mb-2">{elapsed(o.created_at)}</div>
+              )}
+              <div className="space-y-1 mt-3">
+                {o.order_items.map(it => (
+                  <div key={it.id} className="flex justify-between text-sm">
+                    <span>{it.name}</span>
+                    <span className="text-white/60">×{it.qty}</span>
+                  </div>
+                ))}
+              </div>
+              {o.notes && (
+                <div className="mt-3 p-2 bg-amber-500/10 text-amber-200 text-xs rounded">{o.notes}</div>
+              )}
+              <button
+                onClick={() => onAction(o.id)}
+                className="w-full mt-4 bg-white text-charcoal py-2 rounded-md text-sm font-medium hover:bg-white/90"
+              >
+                {actionLabel}
+              </button>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

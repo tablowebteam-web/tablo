@@ -9,20 +9,27 @@ export async function POST(req: NextRequest) {
       restaurantId,
       tableId,
       tableNumber,
-      customerId,            // optional, set if customer is logged in
+      customerId,
+      customerName,
+      customerPhone,
+      orderType = 'dine_in',
       items,
       subtotal,
-      tax: clientTax,        // we'll re-calculate server-side
-      total: clientTotal     // we'll re-calculate server-side
+      notes
     } = body;
 
     if (!restaurantId || !items || items.length === 0) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
+    // Validate dine_in vs parcel constraints
+    if (orderType === 'dine_in' && !tableId) {
+      return NextResponse.json({ error: 'Dine-in orders need a table' }, { status: 400 });
+    }
+
     const admin = createAdminClient();
 
-    // Get restaurant for tax rate
+    // Get restaurant tax rate
     const { data: restaurant } = await admin
       .from('restaurants')
       .select('tax_rate')
@@ -30,26 +37,23 @@ export async function POST(req: NextRequest) {
       .single();
     const taxRate = Number(restaurant?.tax_rate ?? 5);
 
-    // Compute discount if customer is logged in
+    // Compute discount if customer logged in
     let discountAmount = 0;
     let appliedOffer: string | null = null;
 
     if (customerId) {
-      // Get customer profile
       const { data: profile } = await admin
         .from('customer_profiles')
         .select('birthday, anniversary')
         .eq('id', customerId)
         .maybeSingle();
 
-      // Visit count at this restaurant (excluding this new order)
       const { count: visitCount } = await admin
         .from('customer_visits')
         .select('*', { count: 'exact', head: true })
         .eq('customer_id', customerId)
         .eq('restaurant_id', restaurantId);
 
-      // Get this restaurant's offers
       const { data: offers } = await admin
         .from('restaurant_offers')
         .select('offer_type, enabled, discount_kind, discount_value, description')
@@ -61,7 +65,6 @@ export async function POST(req: NextRequest) {
           anniversary: profile.anniversary,
           visitCount: visitCount ?? 0
         };
-
         const best = calculateBestOffer(Number(subtotal), customerCtx, offers as OfferConfig[]);
         if (best) {
           discountAmount = best.discountAmount;
@@ -70,20 +73,32 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Recompute everything server-side (don't trust the client)
     const subtotalNum = Number(subtotal);
     const subtotalAfterDiscount = Math.max(0, subtotalNum - discountAmount);
     const tax = Math.round((subtotalAfterDiscount * taxRate) / 100);
     const total = subtotalAfterDiscount + tax;
+
+    // Generate pickup code for parcel orders
+    let pickupCode: string | null = null;
+    if (orderType === 'parcel') {
+      const { data: codeResult } = await admin
+        .rpc('generate_pickup_code', { p_restaurant_id: restaurantId });
+      pickupCode = codeResult ?? `P-${Date.now().toString().slice(-4)}`;
+    }
 
     // Insert order
     const { data: order, error: orderErr } = await admin
       .from('orders')
       .insert({
         restaurant_id: restaurantId,
-        table_id: tableId,
-        table_number: tableNumber,
+        table_id: orderType === 'dine_in' ? tableId : null,
+        table_number: orderType === 'dine_in' ? tableNumber : null,
         customer_id: customerId ?? null,
+        customer_name: customerName ?? null,
+        customer_phone: customerPhone ?? null,
+        order_type: orderType,
+        pickup_code: pickupCode,
+        notes: notes ?? null,
         status: 'received',
         subtotal: subtotalNum,
         tax,
@@ -109,7 +124,7 @@ export async function POST(req: NextRequest) {
     const { error: itemsErr } = await admin.from('order_items').insert(orderItems);
     if (itemsErr) return NextResponse.json({ error: itemsErr.message }, { status: 500 });
 
-    // Record visit if customer logged in (best-effort)
+    // Record visit if customer logged in
     if (customerId) {
       try {
         await admin.from('customer_visits').insert({
@@ -125,6 +140,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       id: order.id,
       status: order.status,
+      orderType,
+      pickupCode,
       discountAmount,
       appliedOffer,
       tax,
