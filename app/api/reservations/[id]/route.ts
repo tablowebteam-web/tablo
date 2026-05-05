@@ -9,9 +9,24 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
     const body = await req.json();
-    const { action, tableId, cancelledReason, date, time, partySize, notes } = body;
+    const {
+      action,
+      tableId,
+      cancelledReason,
+      declinedReason,
+      date,
+      time,
+      partySize,
+      notes,
+      internalNotes
+    } = body;
 
-    const validActions = ['cancel', 'arrived', 'no_show', 'completed', 'confirm', 'assign_table', 'modify'];
+    const validActions = [
+      'cancel', 'arrived', 'no_show', 'completed',
+      'confirm', 'decline',
+      'assign_table', 'update_internal_notes',
+      'modify', 'admin_modify'
+    ];
     if (!validActions.includes(action)) {
       return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
     }
@@ -25,7 +40,6 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       .maybeSingle();
     if (!reservation) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-    // Permission check
     const { data: profile } = await supabase
       .from('customer_profiles')
       .select('id')
@@ -42,31 +56,22 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     const isOwner = !!membership;
     const isCustomer = profile?.id === reservation.customer_id;
 
-    // Customer-only allowed actions: cancel, modify
     if (!isOwner && !isCustomer) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
-    if (isCustomer && !isOwner && !['cancel', 'modify'].includes(action)) {
+    if (!isOwner && !['cancel', 'modify'].includes(action)) {
       return NextResponse.json({ error: 'Restaurant staff only' }, { status: 403 });
     }
 
-    // Time-based deadline checks (only for customer-initiated actions)
-    const reservationDateTime = new Date(`${reservation.reservation_date}T${reservation.reservation_time}`);
-    const hoursUntil = (reservationDateTime.getTime() - Date.now()) / (1000 * 60 * 60);
-
+    // Customer deadline checks
     if (isCustomer && !isOwner) {
+      const reservationDateTime = new Date(`${reservation.reservation_date}T${reservation.reservation_time}`);
+      const hoursUntil = (reservationDateTime.getTime() - Date.now()) / (1000 * 60 * 60);
       if (action === 'cancel' && hoursUntil < 24) {
-        return NextResponse.json({ error: 'Cannot cancel less than 24 hours before. Please call the restaurant.' }, { status: 400 });
+        return NextResponse.json({ error: 'Cannot cancel less than 24 hours before' }, { status: 400 });
       }
       if (action === 'modify' && hoursUntil < 2) {
-        return NextResponse.json({ error: 'Cannot modify less than 2 hours before. Please call the restaurant.' }, { status: 400 });
-      }
-      // Status checks
-      if (action === 'cancel' && !['pending', 'confirmed'].includes(reservation.status)) {
-        return NextResponse.json({ error: 'This reservation can no longer be cancelled' }, { status: 400 });
-      }
-      if (action === 'modify' && reservation.status !== 'confirmed') {
-        return NextResponse.json({ error: 'This reservation can no longer be modified' }, { status: 400 });
+        return NextResponse.json({ error: 'Cannot modify less than 2 hours before' }, { status: 400 });
       }
     }
 
@@ -77,6 +82,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         updates.status = 'cancelled';
         updates.cancelled_at = new Date().toISOString();
         updates.cancelled_reason = cancelledReason || null;
+        break;
+      case 'decline':
+        updates.status = 'cancelled';
+        updates.cancelled_at = new Date().toISOString();
+        updates.cancelled_reason = declinedReason || 'Declined by restaurant';
         break;
       case 'confirm':
         updates.status = 'confirmed';
@@ -94,63 +104,54 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       case 'assign_table':
         updates.table_id = tableId || null;
         break;
-      case 'modify': {
+      case 'update_internal_notes':
+        updates.internal_notes = internalNotes ?? null;
+        break;
+      case 'modify':
+      case 'admin_modify': {
         if (!date || !time || !partySize) {
           return NextResponse.json({ error: 'Missing date/time/partySize' }, { status: 400 });
         }
-
-        // If modifying date or time, re-check slot availability
-        const dateChanged = date !== reservation.reservation_date;
-        const timeChanged = time !== reservation.reservation_time;
-        const partyChanged = Number(partySize) !== reservation.party_size;
-
-        if (dateChanged || timeChanged || partyChanged) {
-          // Get restaurant config
-          const { data: rest } = await admin
-            .from('restaurants')
-            .select('booking_slot_minutes')
-            .eq('id', reservation.restaurant_id)
-            .single();
-
-          // Check capacity at the new slot — count seats occupied EXCLUDING this reservation
-          const { data: tables } = await admin
-            .from('restaurant_tables')
-            .select('capacity')
-            .eq('restaurant_id', reservation.restaurant_id);
-          const totalCapacity = (tables ?? []).reduce((s, t) => s + Number(t.capacity ?? 0), 0);
-
-          const { data: otherReservations } = await admin
-            .from('reservations')
-            .select('reservation_time, party_size, duration_minutes')
-            .eq('restaurant_id', reservation.restaurant_id)
-            .eq('reservation_date', date)
-            .neq('id', params.id)
-            .in('status', ['confirmed', 'pending', 'arrived']);
-
-          const [h, m] = time.split(':').map(Number);
-          const slotStart = h * 60 + m;
-          const slotEnd = slotStart + 90;
-          let occupied = 0;
-          for (const r of otherReservations ?? []) {
-            const [rh, rm] = (r.reservation_time as string).split(':').map(Number);
-            const rStart = rh * 60 + rm;
-            const rEnd = rStart + Number(r.duration_minutes ?? 90);
-            if (slotStart < rEnd && slotEnd > rStart) {
-              occupied += Number(r.party_size);
+        // For admin_modify, skip availability check (owner override)
+        // For customer modify, do the check
+        if (action === 'modify') {
+          const dateChanged = date !== reservation.reservation_date;
+          const timeChanged = time !== reservation.reservation_time;
+          if (dateChanged || timeChanged || Number(partySize) !== reservation.party_size) {
+            const { data: tables } = await admin
+              .from('restaurant_tables')
+              .select('capacity')
+              .eq('restaurant_id', reservation.restaurant_id);
+            const totalCapacity = (tables ?? []).reduce((s, t) => s + Number(t.capacity ?? 0), 0);
+            const { data: otherReservations } = await admin
+              .from('reservations')
+              .select('reservation_time, party_size, duration_minutes')
+              .eq('restaurant_id', reservation.restaurant_id)
+              .eq('reservation_date', date)
+              .neq('id', params.id)
+              .in('status', ['confirmed', 'pending', 'arrived']);
+            const [h, m] = time.split(':').map(Number);
+            const slotStart = h * 60 + m;
+            const slotEnd = slotStart + 90;
+            let occupied = 0;
+            for (const r of otherReservations ?? []) {
+              const [rh, rm] = (r.reservation_time as string).split(':').map(Number);
+              const rStart = rh * 60 + rm;
+              const rEnd = rStart + Number(r.duration_minutes ?? 90);
+              if (slotStart < rEnd && slotEnd > rStart) {
+                occupied += Number(r.party_size);
+              }
+            }
+            if (totalCapacity - occupied < Number(partySize)) {
+              return NextResponse.json({ error: 'No availability at that time' }, { status: 400 });
             }
           }
-
-          if (totalCapacity - occupied < Number(partySize)) {
-            return NextResponse.json({ error: 'No availability at that time. Please pick another slot.' }, { status: 400 });
-          }
         }
-
         updates.reservation_date = date;
         updates.reservation_time = time;
         updates.party_size = Number(partySize);
         if (notes !== undefined) updates.notes = notes || null;
-        // Reset table assignment if date/time changed
-        if (dateChanged || timeChanged) {
+        if (date !== reservation.reservation_date || time !== reservation.reservation_time) {
           updates.table_id = null;
         }
         break;
