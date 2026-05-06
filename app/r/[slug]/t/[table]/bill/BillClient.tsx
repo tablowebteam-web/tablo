@@ -135,7 +135,14 @@ export default function BillClient({
               <div className="text-xs text-charcoal/60 mt-2">UPI ref: {reference}</div>
             )}
           </div>
-          <Link href={`/r/${restaurant.slug}/t/${table.number}`} className="block mt-5 text-sm text-charcoal/60 hover:text-charcoal">
+          <Link
+            href={`/receipt/ord_${orders.map(o => o.id).join(',')}`}
+            target="_blank"
+            className="block mt-5 bg-forest text-white py-2.5 rounded-md text-sm font-medium hover:bg-forest/90"
+          >
+            🧾 Download receipt (PDF)
+          </Link>
+          <Link href={`/r/${restaurant.slug}/t/${table.number}`} className="block mt-3 text-sm text-charcoal/60 hover:text-charcoal">
             ← Back to menu
           </Link>
         </div>

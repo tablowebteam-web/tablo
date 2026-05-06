@@ -407,6 +407,15 @@ export default function CustomerProfileClient({
                       }`}>{o.status}</div>
                     </div>
                   </div>
+                  {o.status === 'paid' && (
+                    <Link
+                      href={`/receipt/ord_${o.id}`}
+                      target="_blank"
+                      className="block mt-2 text-[11px] text-forest hover:underline text-right"
+                    >
+                      🧾 View receipt →
+                    </Link>
+                  )}
                 </div>
               ))}
             </div>
